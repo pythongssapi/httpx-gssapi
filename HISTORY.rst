@@ -1,6 +1,13 @@
 History
 =======
 
+?.0.0: 2020-03-1?
+-----------------
+
+- Fork project to httpx-gssapi
+- Replace all requests handling to support HTTPX
+
+
 1.2.0: 2020-02-18
 -----------------
 

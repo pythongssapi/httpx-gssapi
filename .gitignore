@@ -3,5 +3,7 @@
 env/
 build/
 dist/
-requests_gssapi.egg-info/
+httpx_gssapi.egg-info/
+venv*/
+.idea/
 
