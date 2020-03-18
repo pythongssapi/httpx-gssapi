@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - '**.py'
+      - '**.yml'
+      - 'requirements.txt'
   schedule:
     # Test master every Saturday at midnight to verify dependencies
     - cron:  '0 0 * * 6'
@@ -34,6 +36,8 @@ jobs:
         python: ['3.6', '3.7', '3.8']
     steps:
       - uses: actions/checkout@v1
+      - name: Setup Build Tools
+        run: sudo apt-get install -y krb5-user gcc
       - name: Set Up Python
         uses: actions/setup-python@v1
         with:
