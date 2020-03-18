@@ -21,12 +21,15 @@ __all__ = (
     'OPTIONAL',
     'DISABLED',
 )
-__version__ = '1.0.0'
 
 import logging
 
 from .gssapi_ import HTTPSPNEGOAuth, REQUIRED, OPTIONAL, DISABLED
 from .exceptions import MutualAuthenticationError
 from .compat import HTTPKerberosAuth
+
+from ._version import get_versions
+__version__ = get_versions()['version']
+del get_versions
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
