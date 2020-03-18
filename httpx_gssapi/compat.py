@@ -1,52 +1,52 @@
 """
 Compatibility library for older versions of python and requests_kerberos
 """
-import sys
-
 import gssapi
+from gssapi.exceptions import GSSError
+
+from httpx import Response
 
 from .gssapi_ import DISABLED, HTTPSPNEGOAuth, SPNEGOExchangeError, log
-
-# python 2.7 introduced a NullHandler which we want to use, but to support
-# older versions, we implement our own if needed.
-if sys.version_info[:2] > (2, 6):
-    from logging import NullHandler
-else:
-    from logging import Handler
-
-    class NullHandler(Handler):
-        def emit(self, record):
-            pass
 
 
 class HTTPKerberosAuth(HTTPSPNEGOAuth):
     """Deprecated compat shim; see HTTPSPNEGOAuth instead."""
-    def __init__(self, mutual_authentication=DISABLED, service="HTTP",
-                 delegate=False, force_preemptive=False, principal=None,
-                 hostname_override=None, sanitize_mutual_error_response=True):
+    def __init__(self,
+                 mutual_authentication: int = DISABLED,
+                 service: str = "HTTP",
+                 delegate: bool = False,
+                 force_preemptive: bool = False,
+                 principal: str = None,
+                 hostname_override: str = None,
+                 sanitize_mutual_error_response: bool = True):
         # put these here for later
         self.principal = principal
         self.service = service
         self.hostname_override = hostname_override
 
-        HTTPSPNEGOAuth.__init__(
-            self,
+        super().__init__(
             mutual_authentication=mutual_authentication,
             target_name=None,
             delegate=delegate,
             opportunistic_auth=force_preemptive,
             creds=None,
-            sanitize_mutual_error_response=sanitize_mutual_error_response)
+            sanitize_mutual_error_response=sanitize_mutual_error_response,
+        )
 
-    def generate_request_header(self, response, host, is_preemptive=False):
+    def generate_request_header(self,
+                                host: str,
+                                response: Response = None) -> str:
         # This method needs to be shimmed because `host` isn't exposed to
         # __init__() and we need to derive things from it.  Also, __init__()
         # can't fail, in the strictest compatability sense.
+        gss_stage = "start"
         try:
             if self.principal is not None:
                 gss_stage = "acquiring credentials"
                 name = gssapi.Name(
-                    self.principal, gssapi.NameType.hostbased_service)
+                    self.principal,
+                    gssapi.NameType.hostbased_service,
+                )
                 self.creds = gssapi.Credentials(name=name, usage="initiate")
 
             # contexts still need to be stored by host, but hostname_override
@@ -59,15 +59,14 @@ class HTTPKerberosAuth(HTTPSPNEGOAuth):
                 if self.hostname_override:
                     kerb_host = self.hostname_override
 
-                kerb_spn = "{0}@{1}".format(self.service, kerb_host)
+                kerb_spn = f"{self.service}@{kerb_host}"
                 self.target_name = gssapi.Name(
-                    kerb_spn, gssapi.NameType.hostbased_service)
+                    kerb_spn,
+                    gssapi.NameType.hostbased_service,
+                )
 
-            return HTTPSPNEGOAuth.generate_request_header(self, response,
-                                                          host, is_preemptive)
-        except gssapi.exceptions.GSSError as error:
-            msg = error.gen_message()
-            log.exception(
-                "generate_request_header(): {0} failed:".format(gss_stage))
-            log.exception(msg)
-            raise SPNEGOExchangeError("%s failed: %s" % (gss_stage, msg))
+            return super().generate_request_header(host, response)
+        except GSSError as error:
+            msg = f"{gss_stage} failed: {error.gen_message()}"
+            log.exception(f"generate_request_header(): {msg}")
+            raise SPNEGOExchangeError(msg)

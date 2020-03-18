@@ -1,18 +1,23 @@
 """
-requests_gssapi.exceptions
+httpx_gssapi.exceptions
 ~~~~~~~~~~~~~~~~~~~
 
 This module contains the set of exceptions.
 
 """
-from requests.exceptions import RequestException
+from httpx import HTTPError
 
 
-class MutualAuthenticationError(RequestException):
+class MutualAuthenticationError(HTTPError):
     """Mutual Authentication Error"""
+    def __str__(self):
+        return f"Unable to authenticate {self.response}"
+
+    def __repr__(self):
+        return f"{__class__.__name__}('{self}')"
 
 
-class SPNEGOExchangeError(RequestException):
+class SPNEGOExchangeError(HTTPError):
     """SPNEGO Exchange Failed Error"""
 
 

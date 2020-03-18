@@ -1,19 +1,19 @@
 import re
 import logging
+from typing import Generator, Optional
 
 from base64 import b64encode, b64decode
 
 import gssapi
+from gssapi.exceptions import GSSError
 
-from requests.auth import AuthBase
-from requests.models import Response
-from requests.compat import urlparse
-from requests.structures import CaseInsensitiveDict
-from requests.cookies import cookiejar_from_dict
+import httpx
+from httpx import Auth, Request, Response
 
 from .exceptions import MutualAuthenticationError, SPNEGOExchangeError
 
 log = logging.getLogger(__name__)
+FlowGen = Generator[Request, Response, None]
 
 # Different types of mutual authentication:
 #  with mutual_authentication set to REQUIRED, all responses will be
@@ -30,56 +30,35 @@ REQUIRED = 1
 OPTIONAL = 2
 DISABLED = 3
 
-
-class SanitizedResponse(Response):
-    """The :class:`Response <Response>` object, which contains a server's
-    response to an HTTP request.
-
-    This differs from `requests.models.Response` in that it's headers and
-    content have been sanitized. This is only used for HTTP Error messages
-    which do not support mutual authentication when mutual authentication is
-    required."""
-
-    def __init__(self, response):
-        super(SanitizedResponse, self).__init__()
-        self.status_code = response.status_code
-        self.encoding = response.encoding
-        self.raw = response.raw
-        self.reason = response.reason
-        self.url = response.url
-        self.request = response.request
-        self.connection = response.connection
-        self._content_consumed = True
-
-        self._content = ""
-        self.cookies = cookiejar_from_dict({})
-        self.headers = CaseInsensitiveDict()
-        self.headers['content-length'] = '0'
-        for header in ('date', 'server'):
-            if header in response.headers:
-                self.headers[header] = response.headers[header]
+_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
 
 
-def _negotiate_value(response):
+def _negotiate_value(response: Response) -> Optional[str]:
     """Extracts the gssapi authentication token from the appropriate header"""
-    if hasattr(_negotiate_value, 'regex'):
-        regex = _negotiate_value.regex
-    else:
-        # There's no need to re-compile this EVERY time it is called. Compile
-        # it once and you won't have the performance hit of the compilation.
-        regex = re.compile(r'Negotiate\s*([^,]*)', re.I)
-        _negotiate_value.regex = regex
-
     authreq = response.headers.get('www-authenticate', None)
     if authreq:
-        match_obj = regex.search(authreq)
+        match_obj = _find_auth(authreq)
         if match_obj:
             return b64decode(match_obj.group(1))
 
-    return None
+
+def _sanitize_response(response: Response):
+    """
+    When mutual authentication is required and an HTTP error is to be
+    returned, this method is used to sanitize the response which cannot
+    be trusted.
+    """
+    response.is_stream_consumed = True
+    response._content = b""
+    response._cookies = httpx.Cookies()
+    headers = response.headers
+    response.headers = httpx.Headers({'content-length': '0'})
+    for header in ('date', 'server'):
+        if header in headers:
+            response.headers[header] = headers[header]
 
 
-class HTTPSPNEGOAuth(AuthBase):
+class HTTPSPNEGOAuth(Auth):
     """Attaches HTTP GSSAPI Authentication to the given Request object.
 
     `mutual_authentication` controls whether GSSAPI should attempt mutual
@@ -105,11 +84,15 @@ class HTTPSPNEGOAuth(AuthBase):
     server responses.  See the `SanitizedResponse` class.
 
     """
-    def __init__(self, mutual_authentication=DISABLED, target_name="HTTP",
-                 delegate=False, opportunistic_auth=False, creds=None,
-                 mech=None, sanitize_mutual_error_response=True):
+    def __init__(self,
+                 mutual_authentication: int = DISABLED,
+                 target_name: Optional[str] = "HTTP",
+                 delegate: bool = False,
+                 opportunistic_auth: bool = False,
+                 creds: gssapi.Credentials = None,
+                 mech: bytes = None,
+                 sanitize_mutual_error_response: bool = True):
         self.context = {}
-        self.pos = None
         self.mutual_authentication = mutual_authentication
         self.target_name = target_name
         self.delegate = delegate
@@ -118,208 +101,158 @@ class HTTPSPNEGOAuth(AuthBase):
         self.mech = mech
         self.sanitize_mutual_error_response = sanitize_mutual_error_response
 
-    def generate_request_header(self, response, host, is_preemptive=False):
+    def auth_flow(self, request: Request) -> FlowGen:
+        if self.opportunistic_auth:
+            # add Authorization header before we receive a 401
+            auth_header = self.generate_request_header(request.url.host)
+
+            log.debug(f"Preemptive Authorization header: {auth_header}")
+            request.headers['Authorization'] = auth_header
+
+        response = yield request
+        yield from self.handle_response(response)
+
+    def handle_response(self, response: Response) -> FlowGen:
+        num_401s = 0
+        while response.status_code == 401 and num_401s < 2:
+            num_401s += 1
+            log.debug(f"Handling 401 response, total seen: {num_401s}")
+            try:
+                response = yield self.handle_401(response)
+            except httpx.ProtocolError:  # GSSAPI isn't supported
+                break
+
+        if response.status_code == 401:
+            log.debug(f"Failed to authenticate, returning 401 response")
+            return
+
+        self.handle_mutual_auth(response)
+
+    def handle_401(self, response: Response) -> Request:
+        """Handles 401's, attempts to use GSSAPI authentication"""
+        log.debug("handle_401(): Handling 401")
+        if _negotiate_value(response) is None:
+            log.debug("handle_401(): GSSAPI is not supported")
+            raise httpx.ProtocolError("GSSAPI is not supported")
+
+        request = self.authenticate_user(response)
+        log.debug(f"handle_401(): returning {request}")
+        return request
+
+    def handle_mutual_auth(self, response: Response):
+        """
+        Handles all responses with the exception of 401s.
+
+        This is necessary so that we can authenticate responses if requested
+        """
+        log.debug(f"handle_mutual_auth(): Handling {response.status_code}")
+
+        if self.mutual_authentication == DISABLED:
+            log.debug(f"handle_mutual_auth(): Mutual auth disabled, ignoring")
+            return
+
+        is_http_error = response.status_code >= 400
+
+        if _negotiate_value(response) is not None:
+            log.debug("handle_mutual_auth(): Authenticating the server")
+            if not self.authenticate_server(response):
+                # Mutual authentication failure when mutual auth is wanted,
+                # raise an exception so the user doesn't use an untrusted
+                # response.
+                log.error("handle_mutual_auth(): Mutual authentication failed")
+                raise MutualAuthenticationError(response=response)
+
+            # Authentication successful
+            log.debug("handle_other(): authentication successful")
+        elif is_http_error or self.mutual_authentication == OPTIONAL:
+            if response.status_code != httpx.codes.OK:
+                log.error(
+                    f"handle_mutual_auth(): Mutual authentication unavailable "
+                    f"on {response.status_code} response"
+                )
+            if (self.mutual_authentication == REQUIRED
+                    and self.sanitize_mutual_error_response):
+                _sanitize_response(response)
+        else:
+            # Unable to attempt mutual authentication when mutual auth is
+            # required, raise an exception so the user doesn't use an
+            # untrusted response.
+            log.error("handle_other(): Mutual authentication failed")
+            raise MutualAuthenticationError(response=response)
+
+    def generate_request_header(self,
+                                host: str,
+                                response: Response = None) -> str:
         """
         Generates the GSSAPI authentication token
 
         If any GSSAPI step fails, raise SPNEGOExchangeError
         with failure detail.
-
         """
-
         gssflags = [gssapi.RequirementFlag.out_of_sequence_detection]
         if self.delegate:
             gssflags.append(gssapi.RequirementFlag.delegate_to_peer)
         if self.mutual_authentication != DISABLED:
             gssflags.append(gssapi.RequirementFlag.mutual_authentication)
 
+        gss_stage = "initiating context"
         try:
-            gss_stage = "initiating context"
             if type(self.target_name) != gssapi.Name:
                 if '@' not in self.target_name:
-                    self.target_name = "%s@%s" % (self.target_name, host)
+                    self.target_name = f"{self.target_name}@{host}"
 
                 self.target_name = gssapi.Name(
-                    self.target_name, gssapi.NameType.hostbased_service)
+                    self.target_name,
+                    gssapi.NameType.hostbased_service,
+                )
             self.context[host] = gssapi.SecurityContext(
-                usage="initiate", flags=gssflags, name=self.target_name,
-                creds=self.creds, mech=self.mech)
+                usage="initiate",
+                flags=gssflags,
+                name=self.target_name,
+                creds=self.creds,
+                mech=self.mech,
+            )
 
             gss_stage = "stepping context"
-            if is_preemptive:
-                gss_response = self.context[host].step()
-            else:
-                gss_response = self.context[host].step(
-                    _negotiate_value(response))
+            token = _negotiate_value(response) if response else None
+            gss_resp = self.context[host].step(token)
+            return f"Negotiate {b64encode(gss_resp).decode()}"
+        except GSSError as error:
+            msg = f"{gss_stage} failed: {error.gen_message()}"
+            log.exception(f"generate_request_header(): {msg}")
+            raise SPNEGOExchangeError(msg)
 
-            return "Negotiate {0}".format(b64encode(gss_response).decode())
-
-        except gssapi.exceptions.GSSError as error:
-            msg = error.gen_message()
-            log.exception(
-                "generate_request_header(): {0} failed:".format(gss_stage))
-            log.exception(msg)
-            raise SPNEGOExchangeError("%s failed: %s" % (gss_stage, msg))
-
-    def authenticate_user(self, response, **kwargs):
+    def authenticate_user(self, response: Response) -> Request:
         """Handles user authentication with GSSAPI"""
-
-        host = urlparse(response.url).hostname
-
+        host = response.url.host
         try:
-            auth_header = self.generate_request_header(response, host)
-        except SPNEGOExchangeError:
-            # GSS Failure, return existing response
-            return response
-
-        log.debug("authenticate_user(): Authorization header: {0}".format(
-            auth_header))
-        response.request.headers['Authorization'] = auth_header
-
-        # Consume the content so we can reuse the connection for the next
-        # request.
-        response.content
-        response.raw.release_conn()
-
-        _r = response.connection.send(response.request, **kwargs)
-        _r.history.append(response)
-
-        log.debug("authenticate_user(): returning {0}".format(_r))
-        return _r
-
-    def handle_401(self, response, **kwargs):
-        """Handles 401's, attempts to use GSSAPI authentication"""
-
-        log.debug("handle_401(): Handling: 401")
-        if _negotiate_value(response) is not None:
-            _r = self.authenticate_user(response, **kwargs)
-            log.debug("handle_401(): returning {0}".format(_r))
-            return _r
+            auth_header = self.generate_request_header(host, response)
+        except SPNEGOExchangeError:  # GSS Failure, return existing response
+            log.debug(f"authenticate_user(): Failed to generate auth header")
         else:
-            log.debug("handle_401(): GSSAPI is not supported")
-            log.debug("handle_401(): returning {0}".format(response))
-            return response
+            log.debug(f"authenticate_user(): Auth header: {auth_header}")
+            response.request.headers['Authorization'] = auth_header
 
-    def handle_other(self, response):
-        """Handles all responses with the exception of 401s.
+        return response.request
 
-        This is necessary so that we can authenticate responses if requested"""
-
-        log.debug("handle_other(): Handling: %d" % response.status_code)
-
-        if self.mutual_authentication not in (REQUIRED, OPTIONAL):
-            log.debug("handle_other(): returning {0}".format(response))
-            return response
-
-        is_http_error = response.status_code >= 400
-
-        if _negotiate_value(response) is not None:
-            log.debug("handle_other(): Authenticating the server")
-            if not self.authenticate_server(response):
-                # Mutual authentication failure when mutual auth is wanted,
-                # raise an exception so the user doesn't use an untrusted
-                # response.
-                log.error("handle_other(): Mutual authentication failed")
-                raise MutualAuthenticationError(
-                    "Unable to authenticate {0}".format(response))
-
-            # Authentication successful
-            log.debug("handle_other(): returning {0}".format(response))
-            return response
-        elif is_http_error or self.mutual_authentication == OPTIONAL:
-            if not response.ok:
-                log.error(
-                    "handle_other(): Mutual authentication unavailable on"
-                    " {0} response".format(response.status_code))
-
-            if self.mutual_authentication == REQUIRED and \
-               self.sanitize_mutual_error_response:
-                return SanitizedResponse(response)
-            return response
-        else:
-            # Unable to attempt mutual authentication when mutual auth is
-            # required, raise an exception so the user doesn't use an
-            # untrusted response.
-            log.error("handle_other(): Mutual authentication failed")
-            raise MutualAuthenticationError(
-                "Unable to authenticate {0}".format(response))
-
-    def authenticate_server(self, response):
+    def authenticate_server(self, response: Response):
         """
         Uses GSSAPI to authenticate the server.
 
         Returns True on success, False on failure.
         """
-
-        log.debug("authenticate_server(): Authenticate header: {0}".format(
-            _negotiate_value(response)))
-
-        host = urlparse(response.url).hostname
+        auth_header = _negotiate_value(response)
+        log.debug(f"authenticate_server(): Authenticate header: {auth_header}")
 
         try:
             # If the handshake isn't complete here, nothing we can do
-            self.context[host].step(_negotiate_value(response))
+            self.context[response.url.host].step(auth_header)
         except gssapi.exceptions.GSSError as error:
-            log.exception("authenticate_server(): context stepping failed:")
-            log.exception(error.gen_message())
+            log.exception(
+                f"authenticate_server(): context stepping "
+                f"failed: {error.gen_message()}"
+            )
             return False
 
-        log.debug("authenticate_server(): returning {0}".format(response))
+        log.debug("authenticate_server(): authentication successful")
         return True
-
-    def handle_response(self, response, **kwargs):
-        """Takes the given response and tries GSSAPI auth, as needed."""
-        num_401s = kwargs.pop('num_401s', 0)
-
-        if self.pos is not None:
-            # Rewind the file position indicator of the body to where
-            # it was to resend the request.
-            response.request.body.seek(self.pos)
-
-        if response.status_code == 401 and num_401s < 2:
-            # 401 Unauthorized. Handle it, and if it still comes back as 401,
-            # that means authentication failed.
-            _r = self.handle_401(response, **kwargs)
-            log.debug("handle_response(): returning %s", _r)
-            log.debug("handle_response() has seen %d 401 responses", num_401s)
-            num_401s += 1
-            return self.handle_response(_r, num_401s=num_401s, **kwargs)
-        elif response.status_code == 401 and num_401s >= 2:
-            # Still receiving 401 responses after attempting to handle them.
-            # Authentication has failed. Return the 401 response.
-            log.debug("handle_response(): returning 401 %s", response)
-            return response
-
-        _r = self.handle_other(response)
-        log.debug("handle_response(): returning %s", _r)
-        return _r
-
-    def deregister(self, response):
-        """Deregisters the response handler"""
-        response.request.deregister_hook('response', self.handle_response)
-
-    def __call__(self, request):
-        if self.opportunistic_auth:
-            # add Authorization header before we receive a 401
-            # by the 401 handler
-            host = urlparse(request.url).hostname
-
-            auth_header = self.generate_request_header(None, host,
-                                                       is_preemptive=True)
-
-            log.debug(
-                "HTTPSPNEGOAuth: Preemptive Authorization header: {0}"
-                .format(auth_header))
-
-            request.headers['Authorization'] = auth_header
-
-        request.register_hook('response', self.handle_response)
-        try:
-            self.pos = request.body.tell()
-        except AttributeError:
-            # In the case of HTTPSPNEGOAuth being reused and the body
-            # of the previous request was a file-like object, pos has
-            # the file position of the previous body. Ensure it's set to
-            # None.
-            self.pos = None
-        return request
