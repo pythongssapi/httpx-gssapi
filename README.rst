@@ -65,8 +65,8 @@ DISABLED
 ^^^^^^^^
 
 By default, there's no need to explicitly disable mutual authentication.
-However, for compatability with older versions of request_gssapi or
-httpx_kerberos, you can explicitly request it not be attempted:
+However, for compatability with older versions of requests_gssapi or
+requests_kerberos, you can explicitly request it not be attempted:
 
 .. code-block:: python
 
