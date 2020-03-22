@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Generator, Optional
+from typing import Generator, Optional, List
 
 from base64 import b64encode, b64decode
 
@@ -189,29 +189,9 @@ class HTTPSPNEGOAuth(Auth):
         If any GSSAPI step fails, raise SPNEGOExchangeError
         with failure detail.
         """
-        gssflags = [gssapi.RequirementFlag.out_of_sequence_detection]
-        if self.delegate:
-            gssflags.append(gssapi.RequirementFlag.delegate_to_peer)
-        if self.mutual_authentication != DISABLED:
-            gssflags.append(gssapi.RequirementFlag.mutual_authentication)
-
         gss_stage = "initiating context"
         try:
-            if type(self.target_name) != gssapi.Name:
-                if '@' not in self.target_name:
-                    self.target_name = f"{self.target_name}@{host}"
-
-                self.target_name = gssapi.Name(
-                    self.target_name,
-                    gssapi.NameType.hostbased_service,
-                )
-            self.context[host] = gssapi.SecurityContext(
-                usage="initiate",
-                flags=gssflags,
-                name=self.target_name,
-                creds=self.creds,
-                mech=self.mech,
-            )
+            self.context[host] = self._make_context(host)
 
             gss_stage = "stepping context"
             token = _negotiate_value(response) if response else None
@@ -235,7 +215,7 @@ class HTTPSPNEGOAuth(Auth):
 
         return response.request
 
-    def authenticate_server(self, response: Response):
+    def authenticate_server(self, response: Response) -> bool:
         """
         Uses GSSAPI to authenticate the server.
 
@@ -256,3 +236,35 @@ class HTTPSPNEGOAuth(Auth):
 
         log.debug("authenticate_server(): authentication successful")
         return True
+
+    def _make_context(self, host: str) -> gssapi.SecurityContext:
+        """
+        Create a GSSAPI security context for handling the authentication.
+
+        :param host:
+            Hostname to create context for. Only used if it isn't included
+            in :py:attr:`target_name`
+        """
+        name = self.target_name
+        if type(name) != gssapi.Name:  # type(name) is str
+            if '@' not in name:
+                name += f"@{host}"
+            name = gssapi.Name(name, gssapi.NameType.hostbased_service)
+
+        return gssapi.SecurityContext(
+            usage="initiate",
+            flags=self._gssflags,
+            name=name,
+            creds=self.creds,
+            mech=self.mech,
+        )
+
+    @property
+    def _gssflags(self) -> List[gssapi.RequirementFlag]:
+        """List of configured GSSAPI requirement flags."""
+        flags = [gssapi.RequirementFlag.out_of_sequence_detection]
+        if self.delegate:
+            flags.append(gssapi.RequirementFlag.delegate_to_peer)
+        if self.mutual_authentication != DISABLED:
+            flags.append(gssapi.RequirementFlag.mutual_authentication)
+        return flags
