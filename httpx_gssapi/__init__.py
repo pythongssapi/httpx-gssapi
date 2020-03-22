@@ -22,6 +22,7 @@ __all__ = (
     'DISABLED',
 )
 
+import os
 import logging
 
 from .gssapi_ import HTTPSPNEGOAuth, REQUIRED, OPTIONAL, DISABLED
@@ -32,4 +33,6 @@ from ._version import get_versions
 __version__ = get_versions()['version']
 del get_versions
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+logger.setLevel(os.environ.get(f'{__name__.upper()}_LOG_LEVEL') or 'WARNING')

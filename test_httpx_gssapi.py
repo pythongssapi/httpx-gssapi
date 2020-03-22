@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Tests for httpx_gssapi."""
 
+import logging
 from base64 import b64encode
 from unittest.mock import Mock, patch
 
@@ -13,6 +14,8 @@ import gssapi.exceptions
 
 import httpx_gssapi
 from httpx_gssapi import REQUIRED, OPTIONAL
+
+logging.basicConfig()
 
 fake_init = Mock(return_value=None)
 fake_creds = Mock(return_value=b"fake creds")
