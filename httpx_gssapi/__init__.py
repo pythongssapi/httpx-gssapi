@@ -15,7 +15,6 @@ Both the sync and async HTTPX APIs should be fully supported.
 """
 __all__ = (
     'HTTPSPNEGOAuth',
-    'HTTPKerberosAuth',
     'MutualAuthenticationError',
     'REQUIRED',
     'OPTIONAL',
@@ -27,7 +26,6 @@ import logging
 
 from .gssapi_ import HTTPSPNEGOAuth, REQUIRED, OPTIONAL, DISABLED
 from .exceptions import MutualAuthenticationError
-from .compat import HTTPKerberosAuth
 
 from ._version import get_versions
 __version__ = get_versions()['version']
