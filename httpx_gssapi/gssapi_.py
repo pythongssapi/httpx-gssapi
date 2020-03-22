@@ -1,6 +1,7 @@
 import re
 import logging
-from typing import Generator, Optional, List
+from functools import wraps
+from typing import Generator, Optional, List, Any
 
 from base64 import b64encode, b64decode
 
@@ -56,6 +57,33 @@ def _sanitize_response(response: Response):
     for header in ('date', 'server'):
         if header in headers:
             response.headers[header] = headers[header]
+
+
+def _handle_gsserror(*, gss_stage: str, result: Any):
+    """
+    Decorator to handle GSSErrors and properly log them against the decorated
+    function's name.
+
+    :param gss_stage:
+        Name of GSS stage that the function is handling. Typically either
+        'initializing' or 'stepping'.
+    :param result:
+        The result to return if a GSSError is raised. If it's an Exception
+        type, then it will be raised with the logged message.
+    """
+    def _decor(func):
+        @wraps(func)
+        def _wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except gssapi.exceptions.GSSError as error:
+                msg = f"{gss_stage} context failed: {error.gen_message()}"
+                log.exception(f"{func.__name__}(): {msg}")
+                if isinstance(result, type) and issubclass(result, Exception):
+                    raise result(msg)
+                return result
+        return _wrapper
+    return _decor
 
 
 class HTTPSPNEGOAuth(Auth):
@@ -180,6 +208,7 @@ class HTTPSPNEGOAuth(Auth):
             log.error("handle_other(): Mutual authentication failed")
             raise MutualAuthenticationError(response=response)
 
+    @_handle_gsserror(gss_stage='stepping', result=SPNEGOExchangeError)
     def generate_request_header(self,
                                 host: str,
                                 response: Response = None) -> str:
@@ -189,18 +218,11 @@ class HTTPSPNEGOAuth(Auth):
         If any GSSAPI step fails, raise SPNEGOExchangeError
         with failure detail.
         """
-        gss_stage = "initiating context"
-        try:
-            self.context[host] = self._make_context(host)
+        self.context[host] = self._make_context(host)
 
-            gss_stage = "stepping context"
-            token = _negotiate_value(response) if response else None
-            gss_resp = self.context[host].step(token)
-            return f"Negotiate {b64encode(gss_resp).decode()}"
-        except GSSError as error:
-            msg = f"{gss_stage} failed: {error.gen_message()}"
-            log.exception(f"generate_request_header(): {msg}")
-            raise SPNEGOExchangeError(msg)
+        token = _negotiate_value(response) if response else None
+        gss_resp = self.context[host].step(token)
+        return f"Negotiate {b64encode(gss_resp).decode()}"
 
     def authenticate_user(self, response: Response) -> Request:
         """Handles user authentication with GSSAPI"""
@@ -215,6 +237,7 @@ class HTTPSPNEGOAuth(Auth):
 
         return response.request
 
+    @_handle_gsserror(gss_stage="stepping", result=False)
     def authenticate_server(self, response: Response) -> bool:
         """
         Uses GSSAPI to authenticate the server.
@@ -224,19 +247,13 @@ class HTTPSPNEGOAuth(Auth):
         auth_header = _negotiate_value(response)
         log.debug(f"authenticate_server(): Authenticate header: {auth_header}")
 
-        try:
-            # If the handshake isn't complete here, nothing we can do
-            self.context[response.url.host].step(auth_header)
-        except gssapi.exceptions.GSSError as error:
-            log.exception(
-                f"authenticate_server(): context stepping "
-                f"failed: {error.gen_message()}"
-            )
-            return False
+        # If the handshake isn't complete here, nothing we can do
+        self.context[response.url.host].step(auth_header)
 
         log.debug("authenticate_server(): authentication successful")
         return True
 
+    @_handle_gsserror(gss_stage="initializing", result=SPNEGOExchangeError)
     def _make_context(self, host: str) -> gssapi.SecurityContext:
         """
         Create a GSSAPI security context for handling the authentication.
