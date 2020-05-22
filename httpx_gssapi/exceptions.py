@@ -19,7 +19,3 @@ class MutualAuthenticationError(HTTPError):
 
 class SPNEGOExchangeError(HTTPError):
     """SPNEGO Exchange Failed Error"""
-
-
-""" Deprecated compatability shim """
-KerberosExchangeError = SPNEGOExchangeError

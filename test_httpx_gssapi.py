@@ -123,59 +123,28 @@ def test_no_force_preemptive(patched_ctx):
 
 def test_generate_request_header(patched_ctx):
     resp = null_response(headers=neg_token)
-    host = resp.url.host
     auth = httpx_gssapi.HTTPSPNEGOAuth()
-    assert auth.generate_request_header(host, resp) == b64_negotiate_response
+    auth.set_auth_header(resp.request, resp)
+    assert resp.request.headers['Authorization'] == b64_negotiate_response
     check_init()
     fake_resp.assert_called_with(b"token")
 
 
 def test_generate_request_header_init_error(patched_ctx_fail):
     response = null_response(headers=neg_token)
-    host = response.url.host
     auth = httpx_gssapi.HTTPSPNEGOAuth()
     with pytest.raises(httpx_gssapi.exceptions.SPNEGOExchangeError):
-        auth.generate_request_header(host, response)
+        auth.set_auth_header(response.request, response)
     check_init()
 
 
 def test_generate_request_header_step_error(patched_ctx_fail):
     response = null_response(headers=neg_token)
-    host = response.url.host
     auth = httpx_gssapi.HTTPSPNEGOAuth()
     with pytest.raises(httpx_gssapi.exceptions.SPNEGOExchangeError):
-        auth.generate_request_header(host, response)
+        auth.set_auth_header(response.request, response)
     check_init()
     fail_resp.assert_called_with(b"token")
-
-
-def test_authenticate_user(patched_ctx):
-    response = null_response(
-        status=401,
-        request=null_request(),
-        headers=neg_token,
-    )
-    auth = httpx_gssapi.HTTPSPNEGOAuth()
-    request = auth.authenticate_user(response)
-    assert 'Authorization' in request.headers
-    assert request.headers['Authorization'] == b64_negotiate_response
-    check_init()
-    fake_resp.assert_called_with(b"token")
-
-
-def test_handle_401(patched_ctx):
-    response = null_response(
-        status=401,
-        request=null_request(),
-        headers=neg_token,
-    )
-
-    auth = httpx_gssapi.HTTPSPNEGOAuth()
-    request = auth.handle_401(response)
-    assert 'Authorization' in request.headers
-    assert request.headers['Authorization'] == b64_negotiate_response
-    check_init()
-    fake_resp.assert_called_with(b"token")
 
 
 def test_authenticate_server(patched_ctx):
@@ -185,21 +154,20 @@ def test_authenticate_server(patched_ctx):
     })
 
     auth = httpx_gssapi.HTTPSPNEGOAuth()
-    auth.context = {"www.example.org": gssapi.SecurityContext}
-    assert auth.authenticate_server(response_ok)
+    assert auth.authenticate_server(response_ok, gssapi.SecurityContext())
     fake_resp.assert_called_with(b"servertoken")
 
 
-def test_handle_other(patched_ctx):
+def test_handle_mutual_auth(patched_ctx):
     response_ok = null_response(headers={
         'www-authenticate': b64_negotiate_server,
         'authorization': b64_negotiate_response,
     })
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
-    auth.context = {"www.example.org": gssapi.SecurityContext}
 
-    auth.handle_mutual_auth(response_ok)  # No error raised
+    # No error raised
+    auth.handle_mutual_auth(response_ok, gssapi.SecurityContext())
     fake_resp.assert_called_with(b"servertoken")
 
 
@@ -210,9 +178,8 @@ def test_handle_response_200(patched_ctx):
     })
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
-    auth.context = {"www.example.org": gssapi.SecurityContext}
 
-    flow = auth.handle_response(response_ok)
+    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
     with pytest.raises(StopIteration):  # No other requests required
         next(flow)
     fake_resp.assert_called_with(b"servertoken")
@@ -222,9 +189,8 @@ def test_handle_response_200_mutual_auth_required_failure(patched_ctx_fail):
     response_ok = null_response()
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
-    auth.context = {"www.example.org": "CTX"}
 
-    flow = auth.handle_response(response_ok)
+    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
     with pytest.raises(httpx_gssapi.MutualAuthenticationError):
         next(flow)
 
@@ -238,9 +204,8 @@ def test_handle_response_200_mutual_auth_required_failure_2(patched_ctx_fail):
     })
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
-    auth.context = {"www.example.org": gssapi.SecurityContext}
 
-    flow = auth.handle_response(response_ok)
+    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
     with pytest.raises(httpx_gssapi.MutualAuthenticationError):
         next(flow)
 
@@ -254,9 +219,8 @@ def test_handle_response_200_mutual_auth_optional_hard_fail(patched_ctx_fail):
     })
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=OPTIONAL)
-    auth.context = {"www.example.org": gssapi.SecurityContext}
 
-    flow = auth.handle_response(response_ok)
+    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
     with pytest.raises(httpx_gssapi.MutualAuthenticationError):
         next(flow)
 
@@ -284,9 +248,8 @@ def test_handle_response_500_mutual_auth_required_failure(patched_ctx_fail):
     response_500._content = b"CONTENT"
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
-    auth.context = {"www.example.org": "CTX"}
 
-    flow = auth.handle_response(response_500)
+    flow = auth.handle_response(response_500, gssapi.SecurityContext())
     with pytest.raises(StopIteration):  # advance flow with no new requests
         next(flow)
 
@@ -411,7 +374,7 @@ def test_explicit_creds(patched_creds, patched_ctx):
     response = null_response(headers=neg_token)
     creds = gssapi.Credentials()
     auth = httpx_gssapi.HTTPSPNEGOAuth(creds=creds)
-    auth.generate_request_header(response.url.host, response)
+    auth.set_auth_header(response.request, response)
     check_init(creds=b"fake creds")
     fake_resp.assert_called_with(b"token")
 
@@ -420,7 +383,7 @@ def test_explicit_mech(patched_creds, patched_ctx):
     response = null_response(headers=neg_token)
     fake_mech = b'fake mech'
     auth = httpx_gssapi.HTTPSPNEGOAuth(mech=fake_mech)
-    auth.generate_request_header(response.url.host, response)
+    auth.set_auth_header(response.request, response)
     check_init(mech=b'fake mech')
     fake_resp.assert_called_with(b"token")
 
@@ -429,7 +392,7 @@ def test_target_name(patched_ctx):
     response = null_response(headers=neg_token)
     target = "HTTP@otherhost.otherdomain.org"
     auth = httpx_gssapi.HTTPSPNEGOAuth(target_name=target)
-    auth.generate_request_header(response.url.host, response)
+    auth.set_auth_header(response.request, response)
     check_init(name=gssapi_name(target))
     fake_resp.assert_called_with(b"token")
 

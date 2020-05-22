@@ -26,7 +26,7 @@ jobs:
           python -m pip install -U pip
           python -m pip install flake8
       - name: Check
-        run: python -m flake8
+        run: python -m flake8 httpx_gssapi
   test:
     name: Test
     needs: flake8
