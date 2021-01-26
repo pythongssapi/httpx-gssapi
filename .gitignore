@@ -6,4 +6,5 @@ dist/
 httpx_gssapi.egg-info/
 venv*/
 .idea/
+.tox/
 
