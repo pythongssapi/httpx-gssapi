@@ -1,12 +1,13 @@
 import re
 import logging
+from itertools import chain
 from functools import wraps
 from typing import Generator, Optional, List, Any
 
 from base64 import b64encode, b64decode
 
 import gssapi
-from gssapi import SecurityContext as SecCtx
+from gssapi import SecurityContext
 from gssapi.exceptions import GSSError
 
 import httpx
@@ -60,7 +61,7 @@ def _sanitize_response(response: Response):
             response.headers[header] = headers[header]
 
 
-def _handle_gsserror(*, gss_stage: str, result: Any):
+def _handle_gsserror(*, gss_stage: str, result: Any = ...):
     """
     Decorator to handle GSSErrors and properly log them against the decorated
     function's name.
@@ -69,8 +70,9 @@ def _handle_gsserror(*, gss_stage: str, result: Any):
         Name of GSS stage that the function is handling. Typically either
         'initializing' or 'stepping'.
     :param result:
-        The result to return if a GSSError is raised. If it's an Exception
-        type, then it will be raised with the logged message.
+        The result to return if a GSSError is raised. If the result is a
+        callable, it will be called first with the message and all args
+        and kwargs.
     """
 
     def _decor(func):
@@ -81,13 +83,25 @@ def _handle_gsserror(*, gss_stage: str, result: Any):
             except GSSError as error:
                 msg = f"{gss_stage} context failed: {error.gen_message()}"
                 log.exception(f"{func.__name__}(): {msg}")
-                if isinstance(result, type) and issubclass(result, Exception):
-                    raise result(msg)
+                if callable(result):
+                    return result(msg, *args, **kwargs)
                 return result
 
         return _wrapper
 
     return _decor
+
+
+def _gss_to_spnego_error(message: str, *args: Any, **kwargs: Any):
+    """Helper function to _handle_gsserror to raise SPNEGOExchangeErrors."""
+    try:
+        request = next(
+            a for a in chain(args, kwargs.values())
+            if isinstance(a, Request)
+        )
+    except StopIteration:  # sanity check
+        raise RuntimeError("No request in arguments!")
+    raise SPNEGOExchangeError(message, request=request)
 
 
 class HTTPSPNEGOAuth(Auth):
@@ -146,7 +160,7 @@ class HTTPSPNEGOAuth(Auth):
 
     def handle_response(self,
                         response: Response,
-                        ctx: SecCtx = None) -> FlowGen:
+                        ctx: SecurityContext = None) -> FlowGen:
         num_401s = 0
         while response.status_code == 401 and num_401s < 2:
             num_401s += 1
@@ -171,7 +185,7 @@ class HTTPSPNEGOAuth(Auth):
 
         self.handle_mutual_auth(response, ctx)
 
-    def handle_mutual_auth(self, response: Response, ctx: SecCtx):
+    def handle_mutual_auth(self, response: Response, ctx: SecurityContext):
         """
         Handles all responses with the exception of 401s.
 
@@ -212,10 +226,10 @@ class HTTPSPNEGOAuth(Auth):
             log.error("handle_other(): Mutual authentication failed")
             raise MutualAuthenticationError(response=response)
 
-    @_handle_gsserror(gss_stage='stepping', result=SPNEGOExchangeError)
+    @_handle_gsserror(gss_stage='stepping', result=_gss_to_spnego_error)
     def set_auth_header(self,
                         request: Request,
-                        response: Response = None) -> SecCtx:
+                        response: Response = None) -> SecurityContext:
         """
         Create a new security context, generate the GSSAPI authentication
         token, and insert it into the request header. The new security context
@@ -223,7 +237,7 @@ class HTTPSPNEGOAuth(Auth):
 
         If any GSSAPI step fails, raise SPNEGOExchangeError with failure detail.
         """
-        ctx = self._make_context(request.url.host)
+        ctx = self._make_context(request)
 
         token = _negotiate_value(response) if response is not None else None
         gss_resp = ctx.step(token or None)
@@ -238,7 +252,9 @@ class HTTPSPNEGOAuth(Auth):
         return ctx
 
     @_handle_gsserror(gss_stage="stepping", result=False)
-    def authenticate_server(self, response: Response, ctx: SecCtx) -> bool:
+    def authenticate_server(self,
+                            response: Response,
+                            ctx: SecurityContext) -> bool:
         """
         Uses GSSAPI to authenticate the server by extracting the negotiate
         value from the response and stepping the security context.
@@ -254,22 +270,22 @@ class HTTPSPNEGOAuth(Auth):
         log.debug("authenticate_server(): authentication successful")
         return True
 
-    @_handle_gsserror(gss_stage="initializing", result=SPNEGOExchangeError)
-    def _make_context(self, host: str) -> SecCtx:
+    @_handle_gsserror(gss_stage='initializing', result=_gss_to_spnego_error)
+    def _make_context(self, request: Request) -> SecurityContext:
         """
         Create a GSSAPI security context for handling the authentication.
 
-        :param host:
-            Hostname to create context for. Only used if it isn't included
-            in :py:attr:`target_name`
+        :param request:
+            Request to make the context for. The hostname from it is
+            used if it isn't included in :py:attr:`target_name`.
         """
         name = self.target_name
         if type(name) != gssapi.Name:  # type(name) is str
             if '@' not in name:
-                name += f"@{host}"
+                name += f"@{request.url.host}"
             name = gssapi.Name(name, gssapi.NameType.hostbased_service)
 
-        return SecCtx(
+        return SecurityContext(
             usage="initiate",
             flags=self._gssflags,
             name=name,
