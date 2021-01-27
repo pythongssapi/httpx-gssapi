@@ -1,5 +1,5 @@
 HTTPX GSSAPI authentication library
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+===================================
 
 `HTTPX <https://github.com/encode/httpx>`_ is a full featured Python HTTP library with both sync and async APIs
 designed to be a next generation HTTP client for Python. This library is a port
