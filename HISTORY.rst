@@ -1,13 +1,12 @@
 History
 =======
 
-?.0.0: 2020-03-1?
+0.1.0: 2021-01-27
 -----------------
 
 - Fork project to httpx-gssapi
 - Replace all requests handling to support HTTPX
 - Remove HTTPKerberosAuth shim
-
 
 1.2.0: 2020-02-18
 -----------------
