@@ -13,7 +13,7 @@ if history.exists():
 
 setup(
     long_description=long_desc,
-    long_description_content_type='rst',
+    long_description_content_type='text/x-rst',
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
 )
