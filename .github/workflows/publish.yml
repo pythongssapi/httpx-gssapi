@@ -24,17 +24,15 @@ jobs:
         run: python setup.py sdist bdist_wheel
       - name: Create GitHub Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          tag: ${{ github.ref }}
+          name: Release ${{ github.ref }}
           body: |
             Change Log:
           draft: true  # Give me a moment to fill in the description
-          prerelease: false
           artifacts: "dist/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@master
         with:
