@@ -5,10 +5,10 @@ httpx_gssapi.exceptions
 This module contains the set of exceptions.
 
 """
-from httpx import HTTPError, Request, Response
+from httpx import RequestError, Request, Response
 
 
-class MutualAuthenticationError(HTTPError):
+class MutualAuthenticationError(RequestError):
     """Mutual Authentication Error"""
 
     def __init__(self, *,
@@ -21,5 +21,5 @@ class MutualAuthenticationError(HTTPError):
         )
 
 
-class SPNEGOExchangeError(HTTPError):
+class SPNEGOExchangeError(RequestError):
     """SPNEGO Exchange Failed Error"""
