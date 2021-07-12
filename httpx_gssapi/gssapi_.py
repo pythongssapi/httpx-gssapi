@@ -82,7 +82,7 @@ def _handle_gsserror(*, gss_stage: str, result: Any = ...):
                 return func(*args, **kwargs)
             except GSSError as error:
                 msg = f"{gss_stage} context failed: {error.gen_message()}"
-                log.exception(f"{func.__name__}(): {msg}")
+                log.exception("%s(): %s", func.__name__, msg)
                 if callable(result):
                     return result(msg, *args, **kwargs)
                 return result
@@ -164,7 +164,7 @@ class HTTPSPNEGOAuth(Auth):
         num_401s = 0
         while response.status_code == 401 and num_401s < 2:
             num_401s += 1
-            log.debug(f"Handling 401 response, total seen: {num_401s}")
+            log.debug("Handling 401 response, total seen: %d", num_401s)
 
             if _negotiate_value(response) is None:
                 log.debug("GSSAPI is not supported")
@@ -191,7 +191,7 @@ class HTTPSPNEGOAuth(Auth):
 
         This is necessary so that we can authenticate responses if requested
         """
-        log.debug(f"handle_mutual_auth(): Handling {response.status_code}")
+        log.debug("handle_mutual_auth(): Handling %d", response.status_code)
 
         if self.mutual_authentication == DISABLED:
             log.debug("handle_mutual_auth(): Mutual auth disabled, ignoring")
@@ -213,8 +213,9 @@ class HTTPSPNEGOAuth(Auth):
         elif is_http_error or self.mutual_authentication == OPTIONAL:
             if response.status_code != httpx.codes.OK:
                 log.error(
-                    f"handle_mutual_auth(): Mutual authentication unavailable "
-                    f"on {response.status_code} response"
+                    "handle_mutual_auth(): Mutual authentication unavailable"
+                    " on %d response",
+                    response.status_code,
                 )
             if (self.mutual_authentication == REQUIRED
                     and self.sanitize_mutual_error_response):
@@ -243,9 +244,9 @@ class HTTPSPNEGOAuth(Auth):
         gss_resp = ctx.step(token or None)
         auth_header = f"Negotiate {b64encode(gss_resp).decode()}"
         log.debug(
-            f"add_request_header(): "
-            f"{'Preemptive ' if token is None else ''}"
-            f"Authorization header: {auth_header}"
+            "add_request_header(): %sAuthorization header: %s",
+            'Preemptive ' if token is None else '',
+            auth_header,
         )
 
         request.headers['Authorization'] = auth_header
@@ -262,7 +263,7 @@ class HTTPSPNEGOAuth(Auth):
         Returns True on success, False on failure.
         """
         auth_header = _negotiate_value(response)
-        log.debug(f"authenticate_server(): Authenticate header: {auth_header}")
+        log.debug("authenticate_server(): Authenticate header: %s", auth_header)
 
         # If the handshake isn't complete here, nothing we can do
         ctx.step(auth_header)
