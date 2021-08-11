@@ -6,8 +6,9 @@ import socket
 import contextlib
 import multiprocessing as mp
 from time import sleep
-from base64 import b64decode
+from base64 import b64decode, b64encode
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Callable
 
 import pytest
 import k5test
@@ -56,12 +57,17 @@ class KrbRequestHandler(BaseHTTPRequestHandler):
     def _respond(self, code, msg, neg_token=None):
         self.send_response(code)
         self.send_header('Content-Type', 'text/plain')
+        # Required to work around proxy test issue
+        # https://github.com/abhinavsingh/proxy.py/issues/398
+        self.send_header('Content-Length', str(len(msg.encode())))
         self._set_www_auth(neg_token)
         self.end_headers()
         self.wfile.write(msg.encode())
 
     def _set_www_auth(self, token=None):
-        www_auth = f'{NEGOTIATE} {token}' if token else NEGOTIATE
+        www_auth = NEGOTIATE
+        if token:
+            www_auth += f' {b64encode(token).decode()}'
         self.send_header(WWW_AUTHENTICATE, www_auth)
 
     def _get_context(self):
@@ -101,10 +107,22 @@ def krb_realm() -> k5test.K5Realm:
 
 
 @pytest.fixture(scope='session')
-def http_server_port() -> int:
-    with contextlib.closing(socket.socket()) as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
+def free_port_factory() -> Callable[[], int]:
+    def _get_free_port() -> int:
+        with contextlib.closing(socket.socket()) as sock:
+            sock.bind(('127.0.0.1', 0))
+            return sock.getsockname()[1]
+    return _get_free_port
+
+
+@pytest.fixture
+def free_port(free_port_factory) -> int:
+    return free_port_factory()
+
+
+@pytest.fixture(scope='session')
+def http_server_port(free_port_factory) -> int:
+    return free_port_factory()
 
 
 @pytest.fixture(scope='session')

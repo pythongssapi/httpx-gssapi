@@ -2,7 +2,7 @@ import re
 import logging
 from itertools import chain
 from functools import wraps
-from typing import Generator, Optional, List, Any
+from typing import Generator, Optional, List, Any, Dict
 
 from base64 import b64encode, b64decode
 
@@ -33,12 +33,40 @@ REQUIRED = 1
 OPTIONAL = 2
 DISABLED = 3
 
+AUTHENTICATE_HEADERS = {
+    401: 'www-authenticate',
+    407: 'proxy-authenticate',
+}
+
+AUTHORIZATION_HEADERS = {
+    401: 'Authorization',
+    407: 'Proxy-Authorization',
+}
+
 _find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
+
+
+def _authenticate_header(response: Response = None) -> str:
+    """Get the proper authenticate header for the given response."""
+    return _status_header(AUTHENTICATE_HEADERS, response)
+
+
+def _authorization_header(response: Response = None) -> str:
+    """Get the proper authorization header for the given response."""
+    return _status_header(AUTHORIZATION_HEADERS, response)
+
+
+def _status_header(headers: Dict[int, str], response: Response = None) -> str:
+    """Helper function to get the right header for the given response."""
+    try:
+        return headers[response.status_code]
+    except (KeyError, AttributeError):
+        return headers[401]
 
 
 def _negotiate_value(response: Response) -> Optional[bytes]:
     """Extracts the gssapi authentication token from the appropriate header"""
-    authreq = response.headers.get('www-authenticate', None)
+    authreq = response.headers.get(_authenticate_header(response), None)
     if authreq:
         match_obj = _find_auth(authreq)
         if match_obj:
@@ -161,10 +189,11 @@ class HTTPSPNEGOAuth(Auth):
     def handle_response(self,
                         response: Response,
                         ctx: SecurityContext = None) -> FlowGen:
-        num_401s = 0
-        while response.status_code == 401 and num_401s < 2:
-            num_401s += 1
-            log.debug("Handling 401 response, total seen: %d", num_401s)
+        sc = response.status_code
+        count = 0
+        while sc in AUTHENTICATE_HEADERS and count < 2:
+            count += 1
+            log.debug("Handling %d response, total seen: %d", sc, count)
 
             if _negotiate_value(response) is None:
                 log.debug("GSSAPI is not supported")
@@ -178,16 +207,19 @@ class HTTPSPNEGOAuth(Auth):
 
             # Try request again, hopefully with a new auth header
             response = yield response.request
+            if response.status_code != sc:  # Status code changed!
+                count = 0
+            sc = response.status_code
 
-        if response.status_code == 401 or ctx is None:
-            log.debug("Failed to authenticate, returning 401 response")
+        if sc in AUTHENTICATE_HEADERS or ctx is None:
+            log.debug("Failed to authenticate, returning %d response", sc)
             return
 
         self.handle_mutual_auth(response, ctx)
 
     def handle_mutual_auth(self, response: Response, ctx: SecurityContext):
         """
-        Handles all responses with the exception of 401s.
+        Handles all responses with the exception of 401s and 407s.
 
         This is necessary so that we can authenticate responses if requested
         """
@@ -249,7 +281,9 @@ class HTTPSPNEGOAuth(Auth):
             auth_header,
         )
 
-        request.headers['Authorization'] = auth_header
+        # Clear token from possible previous proxy auth to avoid replay errors
+        request.headers.pop(AUTHORIZATION_HEADERS[407], None)
+        request.headers[_authorization_header(response)] = auth_header
         return ctx
 
     @_handle_gsserror(gss_stage="stepping", result=False)
@@ -281,6 +315,7 @@ class HTTPSPNEGOAuth(Auth):
             used if it isn't included in :py:attr:`target_name`.
         """
         name = self.target_name
+        # FIXME: Determine proxy host for 407
         if type(name) != gssapi.Name:  # type(name) is str
             if '@' not in name:
                 name += f"@{request.url.host}"
