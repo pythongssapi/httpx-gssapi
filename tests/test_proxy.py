@@ -165,7 +165,7 @@ def client(http_creds, proxy_port) -> httpx.Client:
         yield client
 
 
-@pytest.mark.xfail("Can't determine the proper proxy host")
+@pytest.mark.xfail(reason="Can't determine the proper proxy host")
 @pytest.mark.usefixtures('proxy')
 def test_proxy_external(client):
     for i in range(2):
