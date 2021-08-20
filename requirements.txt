@@ -1,4 +1,4 @@
-httpx>=0.16,<0.19
+httpx>=0.16,<0.20
 gssapi
 pytest
 k5test
