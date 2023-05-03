@@ -14,7 +14,7 @@ jobs:
     name: Flake8
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.5.2
       - name: Set Up Python
         uses: actions/setup-python@v3.1.2
         with:
@@ -34,7 +34,7 @@ jobs:
       matrix:
         python: [ '3.7', '3.8', '3.9', '3.10', '3.11' ]
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v3.5.2
       - name: Setup Build Tools
         run: sudo apt-get install -y libkrb5-dev krb5-user krb5-kdc krb5-admin-server krb5-multidev
       - name: Set Up Python
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3.0.2
+        uses: actions/checkout@v3.5.2
         with:
           fetch-depth: 0
       - name: Set Up Python
