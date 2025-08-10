@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """Tests for httpx_gssapi proxy support."""
 
+import ipaddress
 import os
 import re
 import multiprocessing as mp
 from base64 import b64decode, b64encode
 from time import sleep
-from typing import Optional
+from typing import Callable, Generator, Optional
 
 import httpx
 import pytest
@@ -124,20 +125,25 @@ def start_proxy(realm: k5test.K5Realm,
 
     os.environ.update(realm.env)
 
-    proxy_main([
-        f'--krb5-realm={realm.realm}',
-        f'--hostname={host}',
-        f'--port={port}',
-    ], plugins=[GSSAPIAuthPlugin])
+    proxy_main(
+        krb5_realm=realm.realm,
+        hostname=ipaddress.ip_address(host),
+        port=port,
+        auth_plugins=[GSSAPIAuthPlugin],
+    )
 
 
 @pytest.fixture
-def proxy_port(free_port_factory) -> int:
+def proxy_port(free_port_factory: Callable[[], int]) -> int:
     return free_port_factory()
 
 
 @pytest.fixture
-def proxy(request, krb_realm, proxy_port):
+def proxy(
+    request: pytest.FixtureRequest,
+    krb_realm: k5test.K5Realm,
+    proxy_port: int,
+) -> str:
     ps = mp.Process(
         target=start_proxy,
         args=(krb_realm,),
@@ -152,30 +158,35 @@ def proxy(request, krb_realm, proxy_port):
         if ps.is_alive():
             ps.terminate()
 
+    return f'http://localhost:{proxy_port}'
+
 
 @pytest.fixture
-@pytest.mark.usefixtures('proxy', 'http_server')
-def client(http_creds, proxy_port) -> httpx.Client:
+def client(
+    http_creds: gssapi.Credentials,
+    proxy_port: int,
+    proxy: str,
+    http_server: None,
+) -> Generator[httpx.Client, None, None]:
     auth = httpx_gssapi.HTTPSPNEGOAuth(creds=http_creds)
     with httpx.Client(
-            auth=auth,
-            timeout=500,
-            proxies={'http://': f'http://localhost:{proxy_port}'},
+        auth=auth,
+        timeout=500,
+        proxy=proxy,
+        mounts={"http://": httpx.HTTPTransport(proxy=httpx.Proxy())}
     ) as client:
         yield client
 
 
 @pytest.mark.xfail(reason="Can't determine the proper proxy host")
-@pytest.mark.usefixtures('proxy')
-def test_proxy_external(client):
+def test_proxy_external(client: httpx.Client) -> None:
     for i in range(2):
         # Use neverssl.com to avoid worrying about SSL with the proxy
         resp = client.get('http://neverssl.com/')
         assert resp.status_code == 200
 
 
-@pytest.mark.usefixtures('proxy', 'http_server')
-def test_proxy_local(client, http_server_port):
+def test_proxy_local(client: httpx.Client, http_server_port: int) -> None:
     for i in range(2):
         resp = client.get(f'http://localhost:{http_server_port}/')
         assert resp.status_code == 200

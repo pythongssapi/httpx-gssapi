@@ -8,7 +8,7 @@ import multiprocessing as mp
 from time import sleep
 from base64 import b64decode, b64encode
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Callable
+from typing import Callable, Generator
 
 import pytest
 import k5test
@@ -80,7 +80,7 @@ class KrbRequestHandler(BaseHTTPRequestHandler):
 
 def start_http_server(realm: k5test.K5Realm,
                       host: str = 'localhost',
-                      port: int = 8080):
+                      port: int = 8080) -> None:
     princ = f'HTTP/{host}@{realm.realm}'
     realm.addprinc(princ)
     realm.extract_keytab(princ, realm.keytab)
@@ -97,7 +97,7 @@ def start_http_server(realm: k5test.K5Realm,
 
 
 @pytest.fixture(scope='session')
-def krb_realm() -> k5test.K5Realm:
+def krb_realm() -> Generator[k5test.K5Realm, None, None]:
     realm = k5test.K5Realm()
     env = copy.deepcopy(os.environ)
     os.environ.update(realm.env)
@@ -116,17 +116,21 @@ def free_port_factory() -> Callable[[], int]:
 
 
 @pytest.fixture
-def free_port(free_port_factory) -> int:
+def free_port(free_port_factory: Callable[[], int]) -> int:
     return free_port_factory()
 
 
 @pytest.fixture(scope='session')
-def http_server_port(free_port_factory) -> int:
+def http_server_port(free_port_factory: Callable[[], int]) -> int:
     return free_port_factory()
 
 
 @pytest.fixture(scope='session')
-def http_server(request, krb_realm: k5test.K5Realm, http_server_port: int):
+def http_server(
+    request: pytest.FixtureRequest,
+    krb_realm: k5test.K5Realm,
+    http_server_port: int,
+) -> None:
     ps = mp.Process(
         target=start_http_server,
         args=(krb_realm,),
@@ -143,5 +147,7 @@ def http_server(request, krb_realm: k5test.K5Realm, http_server_port: int):
 
 
 @pytest.fixture
-def http_creds(krb_realm: k5test.K5Realm):
+def http_creds(
+    krb_realm: k5test.K5Realm,
+) -> Generator[gssapi.Credentials, None, None]:
     yield gssapi.Credentials(usage='initiate', name=gssapi.Name('user'))
