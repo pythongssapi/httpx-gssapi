@@ -1,6 +1,11 @@
 History
 =======
 
+FUTURE: TBD
+-----------
+
+- Use SPNEGO mechanism by default
+
 0.1.0: 2021-01-27
 -----------------
 
