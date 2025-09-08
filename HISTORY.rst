@@ -3,8 +3,69 @@ History
 
 FUTURE: TBD
 -----------
-
+- Update HISTORY.rst to reflect previous releases made on GitHub
 - Use SPNEGO mechanism by default
+
+0.4.0: 2024-11-28
+-----------------
+- Update required httpx version for v0.28
+- Drop support for Python 3.7 & 3.8
+- Declare support for Python 3.13
+
+0.3.1: 2024-02-21
+-----------------
+- Update required httpx version for v0.27
+
+0.3.0: 2023-12-20
+-----------------
+- Update required httpx version for v0.26
+- Update versioneer to support Python 3.12
+- Add Python 3.12 testing to CI/CD
+
+0.2.1: 2023-09-20
+-----------------
+- Update required httpx version for v0.25
+
+0.2.0: 2023-05-03
+-----------------
+- Update required httpx version for v0.24
+- Drop support for Python 3.6 and declare support for 3.11
+
+0.1.7: 2022-05-24
+-----------------
+- Update required httpx version for v0.23
+
+0.1.6: 2022-02-03
+-----------------
+- Update required httpx version for v0.22
+
+0.1.5.post1: 2021-12-15
+-----------------
+- Added support for Python 3.10
+
+0.1.5: 2021-11-15
+-----------------
+- Update required httpx version for v0.21
+
+0.1.4: 2021-10-13
+-----------------
+- Update required httpx version for v0.20
+
+0.1.3: 2021-09-20
+-----------------
+- Update required httpx version for v0.19
+
+0.1.2.post1: 2021-06-17
+-----------------
+- Fix HTTPX dependency mismatch between requirements.txt and setup.cfg
+
+0.1.2: 2021-04-27
+-----------------
+- Update required httpx version for v0.18
+
+0.1.1: 2021-04-02
+-----------------
+- Update required httpx version for v0.17
 
 0.1.0: 2021-01-27
 -----------------
