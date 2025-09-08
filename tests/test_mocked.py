@@ -82,7 +82,7 @@ def null_response(status=200, request=null_request(), **kwargs):
 def check_init(**kwargs):
     kwargs.setdefault('name', gssapi_name("HTTP@www.example.org"))
     kwargs.setdefault('creds', None)
-    kwargs.setdefault('mech', None)
+    kwargs.setdefault('mech', gssapi.OID.from_int_seq("1.3.6.1.5.5.2"))
     kwargs.setdefault('flags', gssflags)
     kwargs.setdefault('usage', "initiate")
     fake_init.assert_called_with(**kwargs)
@@ -394,6 +394,15 @@ def test_target_name(patched_ctx):
     auth = httpx_gssapi.HTTPSPNEGOAuth(target_name=target)
     auth.set_auth_header(response.request, response)
     check_init(name=gssapi_name(target))
+    fake_resp.assert_called_with(b"token")
+
+
+def test_os_default_mech(patched_ctx):
+    resp = null_response(headers=neg_token)
+    auth = httpx_gssapi.HTTPSPNEGOAuth(mech=None)
+    auth.set_auth_header(resp.request, resp)
+    assert resp.request.headers['Authorization'] == b64_negotiate_response
+    check_init(mech=None)
     fake_resp.assert_called_with(b"token")
 
 

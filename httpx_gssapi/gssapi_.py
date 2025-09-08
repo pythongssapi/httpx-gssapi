@@ -2,7 +2,7 @@ import re
 import logging
 from itertools import chain
 from functools import wraps
-from typing import Generator, Optional, List, Any
+from typing import Generator, Optional, List, Any, Union
 
 from base64 import b64encode, b64decode
 
@@ -32,6 +32,9 @@ FlowGen = Generator[Request, Response, None]
 REQUIRED = 1
 OPTIONAL = 2
 DISABLED = 3
+
+# OID for the SPNEGO mechanism
+SPNEGO = gssapi.OID.from_int_seq("1.3.6.1.5.5.2")
 
 _find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
 
@@ -125,7 +128,9 @@ class HTTPSPNEGOAuth(Auth):
     Default is `None`.
 
     `mech` is GSSAPI Mechanism (gssapi.Mechanism) to use for negotiation.
-    Default is `None`
+    If explicitly given as ``None``, the underlying ``gssapi`` library will
+    decide which negotiation mechanism to use.
+    Default is `SPNEGO`.
 
     `sanitize_mutual_error_response` controls whether we should clean up
     server responses.  See the `SanitizedResponse` class.
@@ -138,7 +143,7 @@ class HTTPSPNEGOAuth(Auth):
                  delegate: bool = False,
                  opportunistic_auth: bool = False,
                  creds: gssapi.Credentials = None,
-                 mech: bytes = None,
+                 mech: Optional[Union[bytes, gssapi.OID]] = SPNEGO,
                  sanitize_mutual_error_response: bool = True):
         self.mutual_authentication = mutual_authentication
         self.target_name = target_name

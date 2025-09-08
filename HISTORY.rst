@@ -4,6 +4,7 @@ History
 FUTURE: TBD
 -----------
 - Update HISTORY.rst to reflect previous releases made on GitHub
+- Use SPNEGO mechanism by default
 
 0.4.0: 2024-11-28
 -----------------
