@@ -43,7 +43,7 @@ FUTURE: TBD
 - Update required httpx version for v0.22
 
 0.1.5.post1: 2021-12-15
------------------
+-----------------------
 - Added support for Python 3.10
 
 0.1.5: 2021-11-15
@@ -59,7 +59,7 @@ FUTURE: TBD
 - Update required httpx version for v0.19
 
 0.1.2.post1: 2021-06-17
------------------
+-----------------------
 - Fix HTTPX dependency mismatch between requirements.txt and setup.cfg
 
 0.1.2: 2021-04-27
