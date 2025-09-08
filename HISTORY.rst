@@ -3,6 +3,9 @@ History
 
 FUTURE: TBD
 -----------
+
+0.5.0: 2025-09-08
+-----------
 - Update HISTORY.rst to reflect previous releases made on GitHub
 - Use SPNEGO mechanism by default
 
