@@ -397,5 +397,14 @@ def test_target_name(patched_ctx):
     fake_resp.assert_called_with(b"token")
 
 
+def test_os_default_mech(patched_ctx):
+    resp = null_response(headers=neg_token)
+    auth = httpx_gssapi.HTTPSPNEGOAuth(mech=None)
+    auth.set_auth_header(resp.request, resp)
+    assert resp.request.headers['Authorization'] == b64_negotiate_response
+    check_init(mech=None)
+    fake_resp.assert_called_with(b"token")
+
+
 if __name__ == '__main__':
     pytest.main()

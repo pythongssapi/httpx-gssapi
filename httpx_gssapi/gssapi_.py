@@ -2,7 +2,7 @@ import re
 import logging
 from itertools import chain
 from functools import wraps
-from typing import Generator, Optional, List, Any
+from typing import Generator, Optional, List, Any, Union
 
 from base64 import b64encode, b64decode
 
@@ -128,7 +128,9 @@ class HTTPSPNEGOAuth(Auth):
     Default is `None`.
 
     `mech` is GSSAPI Mechanism (gssapi.Mechanism) to use for negotiation.
-    Default is `SPNEGO`
+    If explicitly given as ``None``, the underlying ``gssapi`` library will
+    decide which negotiation mechanism to use.
+    Default is `SPNEGO`.
 
     `sanitize_mutual_error_response` controls whether we should clean up
     server responses.  See the `SanitizedResponse` class.
@@ -141,14 +143,14 @@ class HTTPSPNEGOAuth(Auth):
                  delegate: bool = False,
                  opportunistic_auth: bool = False,
                  creds: gssapi.Credentials = None,
-                 mech: bytes = SPNEGO,
+                 mech: Optional[Union[bytes, gssapi.OID]] = SPNEGO,
                  sanitize_mutual_error_response: bool = True):
         self.mutual_authentication = mutual_authentication
         self.target_name = target_name
         self.delegate = delegate
         self.opportunistic_auth = opportunistic_auth
         self.creds = creds
-        self.mech = mech if mech else SPNEGO
+        self.mech = mech
         self.sanitize_mutual_error_response = sanitize_mutual_error_response
 
     def auth_flow(self, request: Request) -> FlowGen:
