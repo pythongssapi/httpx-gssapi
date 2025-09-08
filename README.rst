@@ -174,7 +174,8 @@ Explicit Mechanism
 ``HTTPSPNEGOAuth`` normally lets SPNEGO decide which negotiation mechanism to use.
 However, an explicit mechanism can be used instead if desired. The ``mech``
 parameter will be passed straight through to ``gssapi`` without interference.
-It is expected to be an instance of ``gssapi.mechs.Mechanism``.
+It is expected to be an instance of ``gssapi.Mechanism``, ``gssapi.OID``, or
+raw bytes.
 
 .. code-block:: python
 
