@@ -4,6 +4,7 @@ History
 FUTURE: TBD
 -----------
 - Added ``py.typed`` marker to declare this package supports typing (closes #50)
+- Added MyPy configuration in `setup.cfg` and added a MyPy job to CI
 
 0.5.0: 2025-09-08
 -----------------

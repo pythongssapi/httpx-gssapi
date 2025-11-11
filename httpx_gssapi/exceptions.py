@@ -5,6 +5,9 @@ httpx_gssapi.exceptions
 This module contains the set of exceptions.
 
 """
+
+from typing import Optional
+
 from httpx import RequestError, Request, Response
 
 
@@ -12,7 +15,7 @@ class MutualAuthenticationError(RequestError):
     """Mutual Authentication Error"""
 
     def __init__(self, *,
-                 request: Request = None,
+                 request: Optional[Request] = None,
                  response: Response):
         self.response = response
         super().__init__(

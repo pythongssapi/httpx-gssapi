@@ -10,7 +10,7 @@ from base64 import b64decode
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import pytest
-import k5test
+import k5test  # type: ignore[import-untyped]
 
 import gssapi.exceptions
 
@@ -86,7 +86,7 @@ def start_http_server(realm: k5test.K5Realm,
 
     with HTTPServer(server_address=(host, port),
                     RequestHandlerClass=KrbRequestHandler) as httpd:
-        httpd.krb5_realm = realm
+        httpd.krb5_realm = realm  # type: ignore[attr-defined]
         httpd.serve_forever()
 
 

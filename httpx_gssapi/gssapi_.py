@@ -42,10 +42,9 @@ _find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
 def _negotiate_value(response: Response) -> Optional[bytes]:
     """Extracts the gssapi authentication token from the appropriate header"""
     authreq = response.headers.get('www-authenticate', None)
-    if authreq:
-        match_obj = _find_auth(authreq)
-        if match_obj:
-            return b64decode(match_obj.group(1))
+    if authreq and (match := _find_auth(authreq)):
+        return b64decode(match.group(1))
+    return None
 
 
 def _sanitize_response(response: Response):
@@ -139,10 +138,10 @@ class HTTPSPNEGOAuth(Auth):
 
     def __init__(self,
                  mutual_authentication: int = DISABLED,
-                 target_name: Optional[str] = "HTTP",
+                 target_name: Optional[Union[str, gssapi.Name]] = "HTTP",
                  delegate: bool = False,
                  opportunistic_auth: bool = False,
-                 creds: gssapi.Credentials = None,
+                 creds: Optional[gssapi.Credentials] = None,
                  mech: Optional[Union[bytes, gssapi.OID]] = SPNEGO,
                  sanitize_mutual_error_response: bool = True):
         self.mutual_authentication = mutual_authentication
@@ -165,7 +164,7 @@ class HTTPSPNEGOAuth(Auth):
 
     def handle_response(self,
                         response: Response,
-                        ctx: SecurityContext = None) -> FlowGen:
+                        ctx: Optional[SecurityContext] = None) -> FlowGen:
         num_401s = 0
         while response.status_code == 401 and num_401s < 2:
             num_401s += 1
@@ -235,7 +234,7 @@ class HTTPSPNEGOAuth(Auth):
     @_handle_gsserror(gss_stage='stepping', result=_gss_to_spnego_error)
     def set_auth_header(self,
                         request: Request,
-                        response: Response = None) -> SecurityContext:
+                        response: Optional[Response] = None) -> SecurityContext:
         """
         Create a new security context, generate the GSSAPI authentication
         token, and insert it into the request header. The new security context
@@ -286,17 +285,17 @@ class HTTPSPNEGOAuth(Auth):
             used if it isn't included in :py:attr:`target_name`.
         """
         name = self.target_name
-        if type(name) != gssapi.Name:  # type(name) is str
-            if '@' not in name:
+        if type(name) != gssapi.Name:  # None/str
+            if isinstance(name, str) and '@' not in name:
                 name += f"@{request.url.host}"
             name = gssapi.Name(name, gssapi.NameType.hostbased_service)
 
         return SecurityContext(
             usage="initiate",
-            flags=self._gssflags,
+            flags=self._gssflags,  # type: ignore[arg-type] # list[int] is fine
             name=name,
             creds=self.creds,
-            mech=self.mech,
+            mech=self.mech,  # type: ignore[arg-type] # bytes are fine
         )
 
     @property
