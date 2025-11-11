@@ -3,6 +3,7 @@ History
 
 FUTURE: TBD
 -----------
+- Added ``py.typed`` marker to declare this package supports typing (closes #50)
 
 0.5.0: 2025-09-08
 -----------------
