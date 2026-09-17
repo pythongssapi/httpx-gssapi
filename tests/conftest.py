@@ -109,7 +109,15 @@ def http_server_port() -> int:
 
 @pytest.fixture(scope='session')
 def http_server(request, krb_realm: k5test.K5Realm, http_server_port: int):
-    ps = mp.Process(
+    # Python 3.14 changed the default multiprocessing start method on POSIX
+    # from "fork" to "forkserver". "forkserver" (and "spawn") pickle the
+    # target's arguments to hand them to the worker process, but the
+    # ``k5test.K5Realm`` object holds an unpicklable ``threading.Lock``
+    # (``TypeError: cannot pickle '_thread.lock' object``). Force the classic
+    # "fork" method so the realm is inherited via memory instead of pickled.
+    # These tests are POSIX/Kerberos-only, so "fork" is always available here.
+    ctx = mp.get_context('fork')
+    ps = ctx.Process(
         target=start_http_server,
         args=(krb_realm,),
         kwargs={'port': http_server_port},

@@ -3,11 +3,15 @@
 
 import logging
 from base64 import b64encode
+from os import getenv
 from unittest.mock import Mock, patch
 
 import pytest
 
-import httpx
+if getenv("HTTPX") == "httpx2":
+    import httpx2 as httpx
+else:
+    import httpx  # type: ignore[no-redef]
 
 import gssapi
 import gssapi.exceptions
