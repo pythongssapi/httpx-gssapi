@@ -53,8 +53,9 @@ jobs:
       - mypy
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python: [ '3.9', '3.10', '3.11', '3.12', '3.13']
+        python: [ '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.15' ]
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Setup Build Tools
@@ -64,6 +65,7 @@ jobs:
       - name: Set Up Python
         uses: actions/setup-python@v7.0.0
         with:
+          allow-prereleases: true
           python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: |
