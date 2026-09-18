@@ -66,27 +66,27 @@ class KrbRequestHandler(BaseHTTPRequestHandler):
 
     def _get_context(self):
         service_name = gssapi.Name(
-            f'HTTP/{self.server.server_name}@{self.server.krb5_realm.realm}'
+            f'HTTP/{self.server.server_name}@{self.server.krb5_realm_name}'
         )
         server_cred = gssapi.Credentials(name=service_name, usage='accept')
         return gssapi.SecurityContext(creds=server_cred)
 
 
-def start_http_server(realm: k5test.K5Realm,
+def start_http_server(realm_name: str,
+                      env: dict,
                       host: str = 'localhost',
                       port: int = 8080):
-    princ = f'HTTP/{host}@{realm.realm}'
-    realm.addprinc(princ)
-    realm.extract_keytab(princ, realm.keytab)
-    realm.ccache = realm.env['KRB5CCNAME'] \
-        = os.path.join(realm.tmpdir, 'service_ccache')
-    realm.kinit(princ, flags=['-k', '-t', realm.keytab])
-
-    os.environ.update(realm.env)
+    # Runs in the worker process. Everything it needs is passed as picklable
+    # data (a realm-name ``str`` and a ``dict[str, str]`` of environment
+    # variables) so this works under the ``spawn``/``forkserver`` start
+    # methods, which pickle the target's arguments. The KDC-side setup
+    # (addprinc/extract_keytab/kinit) has already run in the parent, and the
+    # acceptor credentials resolve from the keytab via ``env`` (KRB5_KTNAME).
+    os.environ.update(env)
 
     with HTTPServer(server_address=(host, port),
                     RequestHandlerClass=KrbRequestHandler) as httpd:
-        httpd.krb5_realm = realm  # type: ignore[attr-defined]
+        httpd.krb5_realm_name = realm_name  # type: ignore[attr-defined]
         httpd.serve_forever()
 
 
@@ -109,10 +109,28 @@ def http_server_port() -> int:
 
 @pytest.fixture(scope='session')
 def http_server(request, krb_realm: k5test.K5Realm, http_server_port: int):
-    ps = mp.Process(
+    host = 'localhost'
+    # Do the KDC-side setup in the parent, where the realm object lives, then
+    # hand the worker only picklable data. This keeps the suite correct under
+    # Python 3.14+, where the default POSIX start method changed from "fork"
+    # to "forkserver" (a fresh interpreter that pickles the target's args --
+    # the ``k5test.K5Realm`` object holds an unpicklable ``threading.Lock``).
+    princ = f'HTTP/{host}@{krb_realm.realm}'
+    krb_realm.addprinc(princ)
+    krb_realm.extract_keytab(princ, krb_realm.keytab)
+    krb_realm.ccache = krb_realm.env['KRB5CCNAME'] \
+        = os.path.join(krb_realm.tmpdir, 'service_ccache')
+    krb_realm.kinit(princ, flags=['-k', '-t', krb_realm.keytab])
+
+    ctx = mp.get_context('forkserver')
+    ps = ctx.Process(
         target=start_http_server,
-        args=(krb_realm,),
-        kwargs={'port': http_server_port},
+        kwargs={
+            'realm_name': krb_realm.realm,
+            'env': dict(krb_realm.env),
+            'host': host,
+            'port': http_server_port,
+        },
     )
     ps.start()
 
