@@ -14,21 +14,21 @@ supports mutual authentication. Basic GET usage:
 Both the sync and async HTTPX APIs should be fully supported.
 """
 __all__ = (
+    'DISABLED',
+    'OPTIONAL',
+    'REQUIRED',
+    'SPNEGO',
     'HTTPSPNEGOAuth',
     'MutualAuthenticationError',
-    'SPNEGO',
-    'REQUIRED',
-    'OPTIONAL',
-    'DISABLED',
 )
 
-import os
 import logging
-
-from .gssapi_ import HTTPSPNEGOAuth, SPNEGO, REQUIRED, OPTIONAL, DISABLED
-from .exceptions import MutualAuthenticationError
+import os
 
 from ._version import get_versions
+from .exceptions import MutualAuthenticationError
+from .gssapi_ import DISABLED, OPTIONAL, REQUIRED, SPNEGO, HTTPSPNEGOAuth
+
 __version__ = get_versions()['version']
 del get_versions
 

@@ -5,15 +5,13 @@ import logging
 from base64 import b64encode
 from unittest.mock import Mock, patch
 
-import pytest
-
-import httpx
-
 import gssapi
 import gssapi.exceptions
+import httpx
+import pytest
 
 import httpx_gssapi
-from httpx_gssapi import REQUIRED, OPTIONAL
+from httpx_gssapi import OPTIONAL, REQUIRED
 
 logging.basicConfig()
 
@@ -75,7 +73,8 @@ def null_request(method='GET', url="http://www.example.org/", **kwargs):
     return httpx.Request(method, url, **kwargs)
 
 
-def null_response(status=200, request=null_request(), **kwargs):
+def null_response(status=200, request=None, **kwargs):
+    request = request or null_request()
     return httpx.Response(status, request=request, **kwargs)
 
 

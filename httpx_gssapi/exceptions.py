@@ -5,17 +5,16 @@ httpx_gssapi.exceptions
 This module contains the set of exceptions.
 
 """
+from __future__ import annotations
 
-from typing import Optional
-
-from httpx import RequestError, Request, Response
+from httpx import Request, RequestError, Response
 
 
 class MutualAuthenticationError(RequestError):
     """Mutual Authentication Error"""
 
     def __init__(self, *,
-                 request: Optional[Request] = None,
+                 request: Request | None = None,
                  response: Response):
         self.response = response
         super().__init__(

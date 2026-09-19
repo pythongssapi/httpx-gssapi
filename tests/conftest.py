@@ -1,24 +1,23 @@
 # TODO: Provide this through k5test?
+import contextlib
+import copy
+import multiprocessing as mp
 import os
 import re
-import copy
 import socket
-import contextlib
-import multiprocessing as mp
-from time import sleep
 from base64 import b64decode
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-import pytest
-import k5test  # type: ignore[import-untyped]
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from time import sleep
 
 import gssapi.exceptions
+import k5test  # type: ignore[import-untyped]
+import pytest
 
 WWW_AUTHENTICATE = 'WWW-Authenticate'
 AUTHORIZATION = 'Authorization'
 NEGOTIATE = 'Negotiate'
 
-_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
+_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.IGNORECASE).search
 
 
 class KrbRequestHandler(BaseHTTPRequestHandler):
@@ -97,7 +96,7 @@ def krb_realm() -> k5test.K5Realm:
     os.environ.update(realm.env)
     yield realm
     realm.stop()
-    os.environ = env
+    os.environ = env # noqa: B003
 
 
 @pytest.fixture(scope='session')

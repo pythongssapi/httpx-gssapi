@@ -1,16 +1,16 @@
-import re
-import logging
-from itertools import chain
-from functools import wraps
-from typing import Generator, Optional, List, Any, Union
+from __future__ import annotations
 
-from base64 import b64encode, b64decode
+import logging
+import re
+from base64 import b64decode, b64encode
+from functools import wraps
+from itertools import chain
+from typing import Any, Generator
 
 import gssapi
+import httpx
 from gssapi import SecurityContext
 from gssapi.exceptions import GSSError
-
-import httpx
 from httpx import Auth, Request, Response
 
 from .exceptions import MutualAuthenticationError, SPNEGOExchangeError
@@ -36,10 +36,10 @@ DISABLED = 3
 # OID for the SPNEGO mechanism
 SPNEGO = gssapi.OID.from_int_seq("1.3.6.1.5.5.2")
 
-_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
+_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.IGNORECASE).search
 
 
-def _negotiate_value(response: Response) -> Optional[bytes]:
+def _negotiate_value(response: Response) -> bytes | None:
     """Extracts the gssapi authentication token from the appropriate header"""
     authreq = response.headers.get('www-authenticate', None)
     if authreq and (match := _find_auth(authreq)):
@@ -138,11 +138,11 @@ class HTTPSPNEGOAuth(Auth):
 
     def __init__(self,
                  mutual_authentication: int = DISABLED,
-                 target_name: Optional[Union[str, gssapi.Name]] = "HTTP",
+                 target_name: str | gssapi.Name | None = "HTTP",
                  delegate: bool = False,
                  opportunistic_auth: bool = False,
-                 creds: Optional[gssapi.Credentials] = None,
-                 mech: Optional[Union[bytes, gssapi.OID]] = SPNEGO,
+                 creds: gssapi.Credentials | None = None,
+                 mech: bytes | gssapi.OID | None = SPNEGO,
                  sanitize_mutual_error_response: bool = True):
         self.mutual_authentication = mutual_authentication
         self.target_name = target_name
@@ -164,7 +164,7 @@ class HTTPSPNEGOAuth(Auth):
 
     def handle_response(self,
                         response: Response,
-                        ctx: Optional[SecurityContext] = None) -> FlowGen:
+                        ctx: SecurityContext | None = None) -> FlowGen:
         num_401s = 0
         while response.status_code == 401 and num_401s < 2:
             num_401s += 1
@@ -234,7 +234,7 @@ class HTTPSPNEGOAuth(Auth):
     @_handle_gsserror(gss_stage='stepping', result=_gss_to_spnego_error)
     def set_auth_header(self,
                         request: Request,
-                        response: Optional[Response] = None) -> SecurityContext:
+                        response: Response | None = None) -> SecurityContext:
         """
         Create a new security context, generate the GSSAPI authentication
         token, and insert it into the request header. The new security context
@@ -299,7 +299,7 @@ class HTTPSPNEGOAuth(Auth):
         )
 
     @property
-    def _gssflags(self) -> List[gssapi.RequirementFlag]:
+    def _gssflags(self) -> list[gssapi.RequirementFlag]:
         """List of configured GSSAPI requirement flags."""
         flags = [gssapi.RequirementFlag.out_of_sequence_detection]
         if self.delegate:
