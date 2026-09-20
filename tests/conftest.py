@@ -6,7 +6,7 @@ import threading as th
 from contextlib import contextmanager
 from base64 import b64decode
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Generator
+from typing import Generator, cast
 
 import pytest
 import k5test  # type: ignore[import-untyped]
@@ -108,7 +108,7 @@ def krb_realm() -> k5test.K5Realm:
 @pytest.fixture(scope='session')
 def http_server(krb_realm: k5test.K5Realm) -> Generator[str, None, None]:
     with start_http_server(krb_realm) as httpd:
-        host, port = httpd.server_address
+        host, port = cast(tuple[str, int], httpd.server_address)
         yield f"http://{host}:{port}/"
         httpd.shutdown()
 

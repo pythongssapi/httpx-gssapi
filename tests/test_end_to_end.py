@@ -2,7 +2,7 @@
 """Tests for httpx_gssapi."""
 import gssapi
 import httpx
-import k5test
+import k5test  # type: ignore[import-untyped]
 import pytest
 
 import httpx_gssapi
