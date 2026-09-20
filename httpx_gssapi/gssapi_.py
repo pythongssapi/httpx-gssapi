@@ -2,6 +2,7 @@ import re
 import logging
 from itertools import chain
 from functools import wraps
+from os import getenv
 from typing import Generator, Optional, List, Any, Union
 
 from base64 import b64encode, b64decode
@@ -10,8 +11,12 @@ import gssapi
 from gssapi import SecurityContext
 from gssapi.exceptions import GSSError
 
-import httpx
-from httpx import Auth, Request, Response
+if getenv("HTTPX") == "httpx2":
+    import httpx2 as httpx
+    from httpx2 import Auth, Request, Response
+else:
+    import httpx  # type: ignore[no-redef]
+    from httpx import Auth, Request, Response  # type: ignore[assignment]
 
 from .exceptions import MutualAuthenticationError, SPNEGOExchangeError
 

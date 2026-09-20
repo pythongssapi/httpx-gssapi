@@ -6,9 +6,13 @@ This module contains the set of exceptions.
 
 """
 
+from os import getenv
 from typing import Optional
 
-from httpx import RequestError, Request, Response
+if getenv("HTTPX") == "httpx2":
+    from httpx2 import RequestError, Request, Response
+else:
+    from httpx import RequestError, Request, Response  # type: ignore[assignment]
 
 
 class MutualAuthenticationError(RequestError):

@@ -1,7 +1,13 @@
 #!/usr/bin/env python
 """Tests for httpx_gssapi."""
+
+from os import getenv
+
+if getenv("HTTPX") == "httpx2":
+    import httpx2 as httpx
+else:
+    import httpx  # type: ignore[no-redef]
 import gssapi
-import httpx
 import k5test  # type: ignore[import-untyped]
 import pytest
 
