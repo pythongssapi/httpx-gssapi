@@ -55,8 +55,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: [ '3.9', '3.10', '3.11', '3.12', '3.13', '3.14' , '3.15' ]
         httpx: [ 'httpx', 'httpx2' ]
+        python:
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+          - '3.13'
+          - '3.14'
+          - '3.15'
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Setup Build Tools

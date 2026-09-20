@@ -2,12 +2,11 @@
 import os
 import re
 import copy
-import socket
-import contextlib
-import multiprocessing as mp
-from time import sleep
+import threading as th
+from contextlib import contextmanager
 from base64 import b64decode
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Generator, cast
 
 import pytest
 import k5test  # type: ignore[import-untyped]
@@ -72,9 +71,12 @@ class KrbRequestHandler(BaseHTTPRequestHandler):
         return gssapi.SecurityContext(creds=server_cred)
 
 
-def start_http_server(realm: k5test.K5Realm,
-                      host: str = 'localhost',
-                      port: int = 8080):
+@contextmanager
+def start_http_server(
+    realm: k5test.K5Realm,
+    host: str = 'localhost',
+    port: int = 0,
+) -> Generator[HTTPServer, None, None]:
     princ = f'HTTP/{host}@{realm.realm}'
     realm.addprinc(princ)
     realm.extract_keytab(princ, realm.keytab)
@@ -82,12 +84,15 @@ def start_http_server(realm: k5test.K5Realm,
         = os.path.join(realm.tmpdir, 'service_ccache')
     realm.kinit(princ, flags=['-k', '-t', realm.keytab])
 
-    os.environ.update(realm.env)
-
-    with HTTPServer(server_address=(host, port),
-                    RequestHandlerClass=KrbRequestHandler) as httpd:
+    with HTTPServer(
+        server_address=(host, port),
+        RequestHandlerClass=KrbRequestHandler,
+    ) as httpd:
         httpd.krb5_realm = realm  # type: ignore[attr-defined]
-        httpd.serve_forever()
+        thread = th.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        yield httpd
+        thread.join(timeout=5)
 
 
 @pytest.fixture(scope='session')
@@ -101,37 +106,15 @@ def krb_realm() -> k5test.K5Realm:
 
 
 @pytest.fixture(scope='session')
-def http_server_port() -> int:
-    with contextlib.closing(socket.socket()) as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
-
-
-@pytest.fixture(scope='session')
-def http_server(request, krb_realm: k5test.K5Realm, http_server_port: int):
-    # Python 3.14 changed the default multiprocessing start method on POSIX
-    # from "fork" to "forkserver". "forkserver" (and "spawn") pickle the
-    # target's arguments to hand them to the worker process, but the
-    # ``k5test.K5Realm`` object holds an unpicklable ``threading.Lock``
-    # (``TypeError: cannot pickle '_thread.lock' object``). Force the classic
-    # "fork" method so the realm is inherited via memory instead of pickled.
-    # These tests are POSIX/Kerberos-only, so "fork" is always available here.
-    ctx = mp.get_context('fork')
-    ps = ctx.Process(
-        target=start_http_server,
-        args=(krb_realm,),
-        kwargs={'port': http_server_port},
-    )
-    ps.start()
-
-    sleep(1)
-
-    @request.addfinalizer
-    def cleanup():
-        if ps.is_alive():
-            ps.terminate()
+def http_server(krb_realm: k5test.K5Realm) -> Generator[str, None, None]:
+    with start_http_server(krb_realm) as httpd:
+        host, port = cast(tuple[str, int], httpd.server_address)
+        yield f"http://{host}:{port}/"
+        httpd.shutdown()
 
 
 @pytest.fixture
-def http_creds(krb_realm: k5test.K5Realm):
+def http_creds(
+    krb_realm: k5test.K5Realm,
+) -> Generator[gssapi.Credentials, None, None]:
     yield gssapi.Credentials(usage='initiate', name=gssapi.Name('user'))
