@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 """Tests for httpx_gssapi."""
 
+import asyncio
 import logging
+import threading
 from base64 import b64encode
 from unittest.mock import Mock, patch
 
@@ -103,7 +105,7 @@ def test_force_preemptive(patched_ctx):
 
     request = null_request()
 
-    flow = auth.auth_flow(request)
+    flow = auth.sync_auth_flow(request)
     next(flow)  # Move to first request yield
 
     assert 'Authorization' in request.headers
@@ -115,7 +117,7 @@ def test_no_force_preemptive(patched_ctx):
 
     request = null_request()
 
-    flow = auth.auth_flow(request)
+    flow = auth.sync_auth_flow(request)
     next(flow)  # Move to first request yield
 
     assert 'Authorization' not in request.headers
@@ -363,11 +365,62 @@ def test_opportunistic_auth(patched_ctx):
 
     request = null_request()
 
-    flow = auth.auth_flow(request)
+    flow = auth.sync_auth_flow(request)
     assert next(flow) is request
 
     assert 'Authorization' in request.headers
     assert request.headers.get('Authorization') == b64_negotiate_response
+
+
+def test_async_auth_flow_offloads_gssapi_work():
+    auth = httpx_gssapi.HTTPSPNEGOAuth(opportunistic_auth=True)
+    event_loop_thread = threading.get_ident()
+    gssapi_thread = None
+
+    def set_auth_header(request, response=None):
+        nonlocal gssapi_thread
+        gssapi_thread = threading.get_ident()
+        request.headers['Authorization'] = b64_negotiate_response
+        return object()
+
+    async def request():
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, request=request)
+        )
+        with patch.object(auth, 'set_auth_header', side_effect=set_auth_header):
+            async with httpx.AsyncClient(auth=auth, transport=transport) as client:
+                response = await client.get('http://www.example.org/')
+        assert response.status_code == 200
+
+    asyncio.run(request())
+    assert gssapi_thread is not None
+    assert gssapi_thread != event_loop_thread
+
+
+def test_async_auth_flow_handles_negotiate_challenge(patched_ctx):
+    auth = httpx_gssapi.HTTPSPNEGOAuth()
+    request_count = 0
+
+    def transport(request):
+        nonlocal request_count
+        request_count += 1
+        if request_count == 1:
+            return httpx.Response(401, headers=neg_token, request=request)
+        assert request.headers['Authorization'] == b64_negotiate_response
+        return httpx.Response(200, request=request)
+
+    async def request():
+        async with httpx.AsyncClient(
+            auth=auth,
+            transport=httpx.MockTransport(transport),
+        ) as client:
+            response = await client.get('http://www.example.org/')
+        assert response.status_code == 200
+
+    asyncio.run(request())
+    assert request_count == 2
+    check_init()
+    fake_resp.assert_called_with(b'token')
 
 
 def test_explicit_creds(patched_creds, patched_ctx):
