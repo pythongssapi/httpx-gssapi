@@ -2,8 +2,8 @@ import asyncio
 import re
 import logging
 from itertools import chain
-from functools import wraps
-from typing import AsyncGenerator, Generator, Optional, List, Any, Union
+from functools import partial, wraps
+from typing import Any, AsyncGenerator, Generator, List, Optional, Union
 
 from base64 import b64encode, b64decode
 
@@ -17,6 +17,7 @@ from httpx import Auth, Request, Response
 from .exceptions import MutualAuthenticationError, SPNEGOExchangeError
 
 log = logging.getLogger(__name__)
+
 FlowGen = Generator[Request, Response, None]
 AsyncFlowGen = AsyncGenerator[Request, Response]
 
@@ -155,7 +156,7 @@ class HTTPSPNEGOAuth(Auth):
         self.mech = mech
         self.sanitize_mutual_error_response = sanitize_mutual_error_response
 
-    def sync_auth_flow(self, request: Request) -> FlowGen:
+    def auth_flow(self, request: Request) -> FlowGen:
         if self.opportunistic_auth:
             # add Authorization header before we receive a 401
             ctx = self.set_auth_header(request)
@@ -163,44 +164,6 @@ class HTTPSPNEGOAuth(Auth):
             ctx = None
 
         response = yield request
-        yield from self.handle_response(response, ctx)
-
-    async def async_auth_flow(self, request: Request) -> AsyncFlowGen:
-        if self.opportunistic_auth:
-            # GSSAPI may perform blocking I/O while acquiring credentials.
-            ctx = await asyncio.to_thread(self.set_auth_header, request)
-        else:
-            ctx = None
-
-        response = yield request
-        num_401s = 0
-        while response.status_code == 401 and num_401s < 2:
-            num_401s += 1
-            log.debug("Handling 401 response, total seen: %d", num_401s)
-
-            if _negotiate_value(response) is None:
-                log.debug("GSSAPI is not supported")
-                break
-
-            log.debug("Generating user authentication header")
-            try:
-                ctx = await asyncio.to_thread(
-                    self.set_auth_header, response.request, response
-                )
-            except SPNEGOExchangeError:
-                log.debug("Failed to generate authentication header")
-
-            response = yield response.request
-
-        if response.status_code == 401 or ctx is None:
-            log.debug("Failed to authenticate, returning 401 response")
-            return
-
-        await asyncio.to_thread(self.handle_mutual_auth, response, ctx)
-
-    def handle_response(
-        self, response: Response, ctx: Optional[SecurityContext] = None
-    ) -> FlowGen:
         num_401s = 0
         while response.status_code == 401 and num_401s < 2:
             num_401s += 1
@@ -224,6 +187,22 @@ class HTTPSPNEGOAuth(Auth):
             return
 
         self.handle_mutual_auth(response, ctx)
+
+    async def async_auth_flow(self, request: Request) -> AsyncFlowGen:
+        to_thread = partial(asyncio.get_running_loop().run_in_executor, None)
+
+        flow = self.auth_flow(request)
+
+        def _send(r: Response) -> Union[Request, None]:
+            try:
+                return flow.send(r)
+            except StopIteration:  # catch here, can't pass through Future
+                return None
+
+        req: Union[Request, None] = await to_thread(next, flow)
+        while req is not None:
+            resp = yield req
+            req = await to_thread(_send, resp)
 
     def handle_mutual_auth(self, response: Response, ctx: SecurityContext):
         """

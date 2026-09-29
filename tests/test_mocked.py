@@ -5,6 +5,7 @@ import asyncio
 import logging
 import threading
 from base64 import b64encode
+from typing import Union
 from unittest.mock import Mock, patch
 
 import pytest
@@ -16,6 +17,7 @@ import gssapi.exceptions
 
 import httpx_gssapi
 from httpx_gssapi import REQUIRED, OPTIONAL
+from httpx_gssapi.gssapi_ import FlowGen
 
 logging.basicConfig()
 
@@ -105,7 +107,7 @@ def test_force_preemptive(patched_ctx):
 
     request = null_request()
 
-    flow = auth.sync_auth_flow(request)
+    flow = auth.auth_flow(request)
     next(flow)  # Move to first request yield
 
     assert 'Authorization' in request.headers
@@ -117,7 +119,7 @@ def test_no_force_preemptive(patched_ctx):
 
     request = null_request()
 
-    flow = auth.sync_auth_flow(request)
+    flow = auth.auth_flow(request)
     next(flow)  # Move to first request yield
 
     assert 'Authorization' not in request.headers
@@ -181,9 +183,9 @@ def test_handle_response_200(patched_ctx):
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
 
-    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
+    flow = _init_sync_flow(auth, response_ok, gssapi.SecurityContext())
     with pytest.raises(StopIteration):  # No other requests required
-        next(flow)
+        flow.send(response_ok)
     fake_resp.assert_called_with(b"servertoken")
 
 
@@ -192,9 +194,9 @@ def test_handle_response_200_mutual_auth_required_failure(patched_ctx_fail):
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
 
-    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
+    flow = _init_sync_flow(auth, response_ok, gssapi.SecurityContext())
     with pytest.raises(httpx_gssapi.MutualAuthenticationError):
-        next(flow)
+        flow.send(response_ok)
 
     assert not fail_resp.called
 
@@ -207,9 +209,9 @@ def test_handle_response_200_mutual_auth_required_failure_2(patched_ctx_fail):
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
 
-    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
+    flow = _init_sync_flow(auth, response_ok, gssapi.SecurityContext())
     with pytest.raises(httpx_gssapi.MutualAuthenticationError):
-        next(flow)
+        flow.send(response_ok)
 
     fail_resp.assert_called_with(b"servertoken")
 
@@ -222,9 +224,9 @@ def test_handle_response_200_mutual_auth_optional_hard_fail(patched_ctx_fail):
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=OPTIONAL)
 
-    flow = auth.handle_response(response_ok, gssapi.SecurityContext())
+    flow = _init_sync_flow(auth, response_ok, gssapi.SecurityContext())
     with pytest.raises(httpx_gssapi.MutualAuthenticationError):
-        next(flow)
+        flow.send(response_ok)
 
     fail_resp.assert_called_with(b"servertoken")
 
@@ -235,9 +237,9 @@ def test_handle_response_200_mutual_auth_optional_soft_failure(patched_ctx):
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=OPTIONAL)
     auth.context = {"www.example.org": gssapi.SecurityContext}
 
-    flow = auth.handle_response(response_ok)
+    flow = _init_sync_flow(auth, response_ok)
     with pytest.raises(StopIteration):  # advance flow with no new requests
-        next(flow)
+        flow.send(response_ok)
 
     assert not fake_resp.called
 
@@ -251,9 +253,9 @@ def test_handle_response_500_mutual_auth_required_failure(patched_ctx_fail):
 
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=REQUIRED)
 
-    flow = auth.handle_response(response_500, gssapi.SecurityContext())
+    flow = _init_sync_flow(auth, response_500, gssapi.SecurityContext())
     with pytest.raises(StopIteration):  # advance flow with no new requests
-        next(flow)
+        flow.send(response_500)
 
     assert 'other' not in response_500.headers
     assert response_500.headers['date'] == 'DATE'
@@ -276,9 +278,9 @@ def test_handle_response_500_mutual_auth_required_fail_no_san(patched_ctx_fail):
     )
     auth.context = {"www.example.org": "CTX"}
 
-    flow = auth.handle_response(response_500)
+    flow = _init_sync_flow(auth, response_500)
     with pytest.raises(StopIteration):  # advance flow with no new requests
-        next(flow)
+        flow.send(response_500)
 
     assert response_500.headers['other'] == 'x'
     assert response_500.headers['date'] == 'DATE'
@@ -298,9 +300,9 @@ def test_handle_response_500_mutual_auth_optional_failure(patched_ctx_fail):
     auth = httpx_gssapi.HTTPSPNEGOAuth(mutual_authentication=OPTIONAL)
     auth.context = {"www.example.org": "CTX"}
 
-    flow = auth.handle_response(response_500)
+    flow = _init_sync_flow(auth, response_500)
     with pytest.raises(StopIteration):  # advance flow with no new requests
-        next(flow)
+        flow.send(response_500)
 
     assert response_500.headers['other'] == 'x'
     assert response_500.headers['date'] == 'DATE'
@@ -313,8 +315,8 @@ def test_handle_response_500_mutual_auth_optional_failure(patched_ctx_fail):
 def test_handle_response_401(patched_ctx):
     auth = httpx_gssapi.HTTPSPNEGOAuth()
     response_401 = null_response(status=401, headers=neg_token)
-    flow = auth.handle_response(response_401)
-    request = next(flow)
+    flow = _init_sync_flow(auth, response_401)
+    request = flow.send(response_401)
     assert isinstance(request, httpx.Request)
     assert request.headers['Authorization'] == b64_negotiate_response
     response_ok = null_response(headers=neg_server, request=request)
@@ -329,9 +331,9 @@ def test_handle_response_401_rejected(patched_ctx):
     # Ensure there is no infinite auth loop.
     auth = httpx_gssapi.HTTPSPNEGOAuth()
     response_401 = null_response(status=401, headers=neg_token)
-    flow = auth.handle_response(response_401)
+    flow = _init_sync_flow(auth, response_401)
 
-    request = next(flow)
+    request = flow.send(response_401)
     assert isinstance(request, httpx.Request)
     assert request.headers['Authorization'] == b64_negotiate_response
 
@@ -349,8 +351,8 @@ def test_handle_response_401_rejected(patched_ctx):
 def test_delegation(patched_ctx):
     auth = httpx_gssapi.HTTPSPNEGOAuth(delegate=True)
     response_401 = null_response(status=401, headers=neg_token)
-    flow = auth.handle_response(response_401)
-    request = next(flow)
+    flow = _init_sync_flow(auth, response_401)
+    request = flow.send(response_401)
     assert isinstance(request, httpx.Request)
     assert request.headers['Authorization'] == b64_negotiate_response
     response_ok = null_response(headers=neg_server, request=request)
@@ -365,7 +367,7 @@ def test_opportunistic_auth(patched_ctx):
 
     request = null_request()
 
-    flow = auth.sync_auth_flow(request)
+    flow = auth.auth_flow(request)
     assert next(flow) is request
 
     assert 'Authorization' in request.headers
@@ -457,6 +459,24 @@ def test_os_default_mech(patched_ctx):
     assert resp.request.headers['Authorization'] == b64_negotiate_response
     check_init(mech=None)
     fake_resp.assert_called_with(b"token")
+
+
+def _init_sync_flow(
+    auth: httpx_gssapi.HTTPSPNEGOAuth,
+    resp: httpx.Response,
+    ctx: Union[gssapi.SecurityContext, None] = None,
+) -> FlowGen:
+    if ctx:
+        auth.set_auth_header = lambda *_: gssapi.SecurityContext()
+        auth.opportunistic_auth = True
+
+    flow = auth.auth_flow(resp.request)
+    assert next(flow) is resp.request
+
+    if ctx:
+        del auth.set_auth_header
+
+    return flow
 
 
 if __name__ == '__main__':
