@@ -1,16 +1,15 @@
-import re
 import logging
-from itertools import chain
+import re
+from base64 import b64decode, b64encode
+from collections.abc import Generator
 from functools import wraps
-from typing import Generator, Optional, List, Any, Union
-
-from base64 import b64encode, b64decode
+from itertools import chain
+from typing import Any, List, Optional, Union
 
 import gssapi
+import httpx
 from gssapi import SecurityContext
 from gssapi.exceptions import GSSError
-
-import httpx
 from httpx import Auth, Request, Response
 
 from .exceptions import MutualAuthenticationError, SPNEGOExchangeError
@@ -36,7 +35,7 @@ DISABLED = 3
 # OID for the SPNEGO mechanism
 SPNEGO = gssapi.OID.from_int_seq("1.3.6.1.5.5.2")
 
-_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
+_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.IGNORECASE).search
 
 
 def _negotiate_value(response: Response) -> Optional[bytes]:

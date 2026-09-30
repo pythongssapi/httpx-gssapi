@@ -5,15 +5,13 @@ import logging
 from base64 import b64encode
 from unittest.mock import Mock, patch
 
-import pytest
-
-import httpx
-
 import gssapi
 import gssapi.exceptions
+import httpx
+import pytest
 
 import httpx_gssapi
-from httpx_gssapi import REQUIRED, OPTIONAL
+from httpx_gssapi import OPTIONAL, REQUIRED
 
 logging.basicConfig()
 

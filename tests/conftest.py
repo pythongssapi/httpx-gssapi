@@ -1,23 +1,23 @@
 # TODO: Provide this through k5test?
+import copy
 import os
 import re
-import copy
 import threading as th
-from contextlib import contextmanager
 from base64 import b64decode
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Generator, cast
-
-import pytest
-import k5test  # type: ignore[import-untyped]
+from collections.abc import Generator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import cast
 
 import gssapi.exceptions
+import k5test  # type: ignore[import-untyped]
+import pytest
 
 WWW_AUTHENTICATE = 'WWW-Authenticate'
 AUTHORIZATION = 'Authorization'
 NEGOTIATE = 'Negotiate'
 
-_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.I).search
+_find_auth = re.compile(r'Negotiate\s*([^,]*)', re.IGNORECASE).search
 
 
 class KrbRequestHandler(BaseHTTPRequestHandler):
