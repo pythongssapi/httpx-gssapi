@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 from pathlib import Path
+
 from setuptools import setup
+
 import versioneer
 
 path = Path(__file__).parent
