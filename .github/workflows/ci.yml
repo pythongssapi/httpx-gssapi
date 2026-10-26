@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Set Up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.10'
       - name: Install dependencies
@@ -36,7 +36,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install --yes libkrb5-dev krb5-user krb5-kdc krb5-admin-server krb5-multidev
       - name: Set Up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.13'
       - name: Install dependencies
@@ -70,7 +70,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install --yes libkrb5-dev krb5-user krb5-kdc krb5-admin-server krb5-multidev
       - name: Set Up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           allow-prereleases: true
           python-version: ${{ matrix.python }}
@@ -95,7 +95,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set Up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.10'
       - name: Install dependencies
