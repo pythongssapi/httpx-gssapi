@@ -1,8 +1,9 @@
+import asyncio
 import re
 import logging
 from itertools import chain
-from functools import wraps
-from typing import Generator, Optional, List, Any, Union
+from functools import partial, wraps
+from typing import Any, AsyncGenerator, Generator, List, Optional, Union
 
 from base64 import b64encode, b64decode
 
@@ -16,7 +17,9 @@ from httpx import Auth, Request, Response
 from .exceptions import MutualAuthenticationError, SPNEGOExchangeError
 
 log = logging.getLogger(__name__)
+
 FlowGen = Generator[Request, Response, None]
+AsyncFlowGen = AsyncGenerator[Request, Response]
 
 # Different types of mutual authentication:
 #  with mutual_authentication set to REQUIRED, all responses will be
@@ -98,8 +101,7 @@ def _gss_to_spnego_error(message: str, *args: Any, **kwargs: Any):
     """Helper function to _handle_gsserror to raise SPNEGOExchangeErrors."""
     try:
         request = next(
-            a for a in chain(args, kwargs.values())
-            if isinstance(a, Request)
+            a for a in chain(args, kwargs.values()) if isinstance(a, Request)
         )
     except StopIteration:  # sanity check
         raise RuntimeError("No request in arguments!")
@@ -136,14 +138,16 @@ class HTTPSPNEGOAuth(Auth):
 
     """
 
-    def __init__(self,
-                 mutual_authentication: int = DISABLED,
-                 target_name: Optional[Union[str, gssapi.Name]] = "HTTP",
-                 delegate: bool = False,
-                 opportunistic_auth: bool = False,
-                 creds: Optional[gssapi.Credentials] = None,
-                 mech: Optional[Union[bytes, gssapi.OID]] = SPNEGO,
-                 sanitize_mutual_error_response: bool = True):
+    def __init__(
+        self,
+        mutual_authentication: int = DISABLED,
+        target_name: Optional[Union[str, gssapi.Name]] = "HTTP",
+        delegate: bool = False,
+        opportunistic_auth: bool = False,
+        creds: Optional[gssapi.Credentials] = None,
+        mech: Optional[Union[bytes, gssapi.OID]] = SPNEGO,
+        sanitize_mutual_error_response: bool = True,
+    ):
         self.mutual_authentication = mutual_authentication
         self.target_name = target_name
         self.delegate = delegate
@@ -160,11 +164,6 @@ class HTTPSPNEGOAuth(Auth):
             ctx = None
 
         response = yield request
-        yield from self.handle_response(response, ctx)
-
-    def handle_response(self,
-                        response: Response,
-                        ctx: Optional[SecurityContext] = None) -> FlowGen:
         num_401s = 0
         while response.status_code == 401 and num_401s < 2:
             num_401s += 1
@@ -188,6 +187,22 @@ class HTTPSPNEGOAuth(Auth):
             return
 
         self.handle_mutual_auth(response, ctx)
+
+    async def async_auth_flow(self, request: Request) -> AsyncFlowGen:
+        to_thread = partial(asyncio.get_running_loop().run_in_executor, None)
+
+        flow = self.auth_flow(request)
+
+        def _send(r: Response) -> Union[Request, None]:
+            try:
+                return flow.send(r)
+            except StopIteration:  # catch here, can't pass through Future
+                return None
+
+        req: Union[Request, None] = await to_thread(next, flow)
+        while req is not None:
+            resp = yield req
+            req = await to_thread(_send, resp)
 
     def handle_mutual_auth(self, response: Response, ctx: SecurityContext):
         """
@@ -221,8 +236,10 @@ class HTTPSPNEGOAuth(Auth):
                     " on %d response",
                     response.status_code,
                 )
-            if (self.mutual_authentication == REQUIRED
-                    and self.sanitize_mutual_error_response):
+            if (
+                self.mutual_authentication == REQUIRED
+                and self.sanitize_mutual_error_response
+            ):
                 _sanitize_response(response)
         else:
             # Unable to attempt mutual authentication when mutual auth is
@@ -232,9 +249,9 @@ class HTTPSPNEGOAuth(Auth):
             raise MutualAuthenticationError(response=response)
 
     @_handle_gsserror(gss_stage='stepping', result=_gss_to_spnego_error)
-    def set_auth_header(self,
-                        request: Request,
-                        response: Optional[Response] = None) -> SecurityContext:
+    def set_auth_header(
+        self, request: Request, response: Optional[Response] = None
+    ) -> SecurityContext:
         """
         Create a new security context, generate the GSSAPI authentication
         token, and insert it into the request header. The new security context
@@ -257,9 +274,7 @@ class HTTPSPNEGOAuth(Auth):
         return ctx
 
     @_handle_gsserror(gss_stage="stepping", result=False)
-    def authenticate_server(self,
-                            response: Response,
-                            ctx: SecurityContext) -> bool:
+    def authenticate_server(self, response: Response, ctx: SecurityContext) -> bool:
         """
         Uses GSSAPI to authenticate the server by extracting the negotiate
         value from the response and stepping the security context.
